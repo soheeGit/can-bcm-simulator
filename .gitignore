@@ -5,6 +5,9 @@ build/
 # playground 실행 파일
 playground/hello
 playground/hello_linux
+playground/*.i
+playground/*.s
+playground/link_demo/demo
 
 # macOS
 .DS_Store
