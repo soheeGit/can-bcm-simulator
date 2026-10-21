@@ -1,0 +1,10 @@
+# 빌드 산출물
+build/
+*.o
+
+# playground 실행 파일
+playground/hello
+playground/hello_linux
+
+# macOS
+.DS_Store

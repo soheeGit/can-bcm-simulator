@@ -16,13 +16,13 @@
 
 | 마일스톤 | 주제 | 핵심 산출물 | 예상 기간 |
 | --- | --- | --- | --- |
-| [M0](https://github.com/soheeGit/can-bcm-simulator/milestones) | 개발 환경 & C 기초 | Makefile, 테스트 매크로, C 학습 노트 | 4~6일 |
-| [M1](https://github.com/soheeGit/can-bcm-simulator/milestones) | CAN 프로토콜 이해 & 데이터 모델 | `CanFrame` 구조체, 신호 정의서 | 2~3일 |
-| [M2](https://github.com/soheeGit/can-bcm-simulator/milestones) | 신호 디코더(파서) | 비트 추출/삽입 함수, 신호별 디코더 | 3~4일 |
-| [M3](https://github.com/soheeGit/can-bcm-simulator/milestones) | 파일 I/O 기반 로그 처리 | candump 로그 파서, 시나리오 로그, CLI | 3~4일 |
-| [M4](https://github.com/soheeGit/can-bcm-simulator/milestones) | BCM 상태 머신(FSM) | FSM, 자동잠금/경고/Fail-safe, BCM 송신 프레임 | 4~5일 |
-| [M5](https://github.com/soheeGit/can-bcm-simulator/milestones) | Linux SocketCAN 연동 (심화) | vcan0 실시간 수신/송신 루프 | 4~6일 |
-| [M6](https://github.com/soheeGit/can-bcm-simulator/milestones) | 품질 & 포트폴리오 | CI, 정적분석, README, 회고 | 2~3일 |
+| [M0](https://github.com/soheeGit/can-bcm-simulator/milestone/1) | 개발 환경 & C 기초 | Makefile, 테스트 매크로, C 학습 노트 | 4~6일 |
+| [M1](https://github.com/soheeGit/can-bcm-simulator/milestone/2) | CAN 프로토콜 이해 & 데이터 모델 | `CanFrame` 구조체, 신호 정의서 | 2~3일 |
+| [M2](https://github.com/soheeGit/can-bcm-simulator/milestone/3) | 신호 디코더(파서) | 비트 추출/삽입 함수, 신호별 디코더 | 3~4일 |
+| [M3](https://github.com/soheeGit/can-bcm-simulator/milestone/4) | 파일 I/O 기반 로그 처리 | candump 로그 파서, 시나리오 로그, CLI | 3~4일 |
+| [M4](https://github.com/soheeGit/can-bcm-simulator/milestone/5) | BCM 상태 머신(FSM) | FSM, 자동잠금/경고/Fail-safe, BCM 송신 프레임 | 4~5일 |
+| [M5](https://github.com/soheeGit/can-bcm-simulator/milestone/6) | Linux SocketCAN 연동 (심화) | vcan0 실시간 수신/송신 루프 | 4~6일 |
+| [M6](https://github.com/soheeGit/can-bcm-simulator/milestone/7) | 품질 & 포트폴리오 | CI, 정적분석, README, 회고 | 2~3일 |
 
 > 기획안의 "3~5일"은 C에 익숙한 사람 기준입니다. 공부하면서 진행하면 **3~5주**를 잡는 게 현실적입니다.
 
