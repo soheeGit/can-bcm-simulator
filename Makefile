@@ -7,9 +7,17 @@ TARGET := $(BUILD)/bcm_sim
 SRCS := $(wildcard src/*.c)
 OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 
-.PHONY: all test clean
+# make debug: AddressSanitizer + UndefinedBehaviorSanitizer 포함 빌드 (build/debug/)
+SANFLAGS     := -fsanitize=address,undefined -fno-omit-frame-pointer
+DEBUG_BUILD  := $(BUILD)/debug
+DEBUG_TARGET := $(DEBUG_BUILD)/bcm_sim
+DEBUG_OBJS   := $(patsubst src/%.c,$(DEBUG_BUILD)/%.o,$(SRCS))
+
+.PHONY: all debug test clean
 
 all: $(TARGET)
+
+debug: $(DEBUG_TARGET)
 
 # 링크: 모든 .o → 실행 파일
 $(TARGET): $(OBJS)
@@ -19,7 +27,13 @@ $(TARGET): $(OBJS)
 $(BUILD)/%.o: src/%.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD):
+$(DEBUG_TARGET): $(DEBUG_OBJS)
+	$(CC) $(CFLAGS) $(SANFLAGS) $^ -o $@
+
+$(DEBUG_BUILD)/%.o: src/%.c | $(DEBUG_BUILD)
+	$(CC) $(CFLAGS) $(SANFLAGS) -c $< -o $@
+
+$(BUILD) $(DEBUG_BUILD):
 	mkdir -p $@
 
 test:
