@@ -1,15 +1,22 @@
 #include <stdio.h>
 
 #include "can_frame.h"
+#include "signals.h"
 
 int main(void) {
     printf("can-bcm-simulator v0.0.1\n");
 
-    /* M1-2 확인용: 0x100 VEHICLE_SPEED 프레임 (100.00 km/h) */
-    CanFrame speed = { .id = 0x100, .dlc = 8, .data = {0x10, 0x27} };
+    /* 확인용 샘플 (M3-6에서 로그 파일 처리로 바뀔 예정) */
+    CanFrame speed = { .id = MSG_ID_VEHICLE_SPEED, .dlc = 8, .data = {0x10, 0x27} };
     printf("샘플 프레임: ");
     can_frame_print(&speed);
-    printf("유효한 프레임? %s\n", can_frame_is_valid(&speed) ? "yes" : "no");
+
+    VehicleSpeed s;
+    char buf[32];
+    if (decode_vehicle_speed(&speed, &s)) {
+        vehicle_speed_format(&s, buf, sizeof(buf));
+        printf("차속: %s\n", buf);
+    }
 
     return 0;
 }
