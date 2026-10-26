@@ -75,4 +75,48 @@ bool door_any_open(const DoorStatus *d);
 /* "FL=1 FR=0 RL=0 RR=0 TRUNK=1" 형태의 문자열로 만든다 (로그용) */
 void door_status_format(const DoorStatus *d, char *buf, size_t size);
 
+/* ---------- 0x300 IGN_STATUS ---------- */
+
+#define IGN_STATUS_MIN_DLC    2u    /* 최소 길이: data[0](IgnState), data[1](Gear) */
+#define IGN_STATE_START_BIT   0u
+#define IGN_STATE_LENGTH      2u
+#define GEAR_START_BIT        8u
+#define GEAR_LENGTH           3u
+
+/* 시동 상태 (정의서: 2비트, 0~3 전부 정의됨) */
+typedef enum {
+    IGN_OFF   = 0,
+    IGN_ACC   = 1,
+    IGN_ON    = 2,
+    IGN_START = 3
+} IgnState;
+
+/* 기어 (정의서: 3비트, 0~3만 정의, 4~7은 무효)
+ * C의 enum은 그냥 정수라서 범위 밖 값이 들어와도 에러가 안 난다
+ * → 디코더가 4~7을 GEAR_INVALID로 바꿔서 넣는다 */
+typedef enum {
+    GEAR_P       = 0,
+    GEAR_R       = 1,
+    GEAR_N       = 2,
+    GEAR_D       = 3,
+    GEAR_INVALID = 4
+} Gear;
+
+typedef struct {
+    IgnState ign;
+    Gear     gear;
+} IgnStatus;
+
+/* 0x300 프레임에서 시동/기어를 꺼낸다.
+ * 반환값: 해석할 수 있으면 true (false: NULL, 유효하지 않은 프레임, ID가 0x300이 아님, DLC < 2)
+ * 기어 raw 값이 4~7이면 true를 반환하고 out->gear = GEAR_INVALID */
+bool decode_ign_status(const CanFrame *f, IgnStatus *out);
+
+/* enum → 문자열 (로그용). 정의되지 않은 값이면 "UNKNOWN" */
+const char *ign_state_name(IgnState s);
+const char *gear_name(Gear g);
+
+/* "IGN=ON GEAR=D" 형태의 문자열로 만든다 (로그용) */
+void ign_status_format(const IgnStatus *s, char *buf, size_t size);
+
 #endif

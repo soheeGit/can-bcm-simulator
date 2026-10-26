@@ -93,3 +93,71 @@ void door_status_format(const DoorStatus *d, char *buf, size_t size) {
     snprintf(buf, size, "FL=%d FR=%d RL=%d RR=%d TRUNK=%d",
              d->fl, d->fr, d->rl, d->rr, d->trunk);
 }
+
+/* ---------- 0x300 IGN_STATUS ---------- */
+
+/* 기어 raw 값(0~7) → Gear. 정의서에 없는 4~7은 GEAR_INVALID */
+static Gear gear_from_raw(uint32_t raw) {
+    switch (raw) {
+        case 0u: return GEAR_P;
+        case 1u: return GEAR_R;
+        case 2u: return GEAR_N;
+        case 3u: return GEAR_D;
+        default: return GEAR_INVALID;
+    }
+}
+
+bool decode_ign_status(const CanFrame *f, IgnStatus *out) {
+    if (f == NULL || out == NULL) {
+        return false;
+    }
+    if (!can_frame_is_valid(f)) {
+        return false;
+    }
+    if (f->id != MSG_ID_IGN_STATUS) {
+        return false;
+    }
+    if (f->dlc < IGN_STATUS_MIN_DLC) {
+        return false;                       /* 기어가 data[1]에 있어서 2바이트 필요 */
+    }
+
+    /* IgnState는 2비트라 0~3이 전부 정의돼 있다 → 그대로 enum으로 */
+    uint32_t ign_raw  = can_get_bits(f->data, IGN_STATE_START_BIT, IGN_STATE_LENGTH);
+    uint32_t gear_raw = can_get_bits(f->data, GEAR_START_BIT, GEAR_LENGTH);
+
+    out->ign  = (IgnState)ign_raw;
+    out->gear = gear_from_raw(gear_raw);
+    return true;
+}
+
+const char *ign_state_name(IgnState s) {
+    switch (s) {
+        case IGN_OFF:   return "OFF";
+        case IGN_ACC:   return "ACC";
+        case IGN_ON:    return "ON";
+        case IGN_START: return "START";
+        default:        return "UNKNOWN";   /* enum은 정수라 범위 밖 값이 들어올 수 있다 */
+    }
+}
+
+const char *gear_name(Gear g) {
+    switch (g) {
+        case GEAR_P:       return "P";
+        case GEAR_R:       return "R";
+        case GEAR_N:       return "N";
+        case GEAR_D:       return "D";
+        case GEAR_INVALID: return "INVALID";
+        default:           return "UNKNOWN";
+    }
+}
+
+void ign_status_format(const IgnStatus *s, char *buf, size_t size) {
+    if (buf == NULL || size == 0u) {
+        return;
+    }
+    if (s == NULL) {
+        snprintf(buf, size, "(null)");
+        return;
+    }
+    snprintf(buf, size, "IGN=%s GEAR=%s", ign_state_name(s->ign), gear_name(s->gear));
+}

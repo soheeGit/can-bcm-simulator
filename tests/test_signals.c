@@ -199,6 +199,95 @@ static void test_door_format(void) {
     ASSERT_STR_EQ("FL=1 FR=0 RL=0 RR=0 TRUNK=1", buf);
 }
 
+/* ========== 0x300 IGN_STATUS (M2-5) ========== */
+
+static CanFrame ign_frame(uint8_t b0, uint8_t b1) {
+    CanFrame f = { .id = MSG_ID_IGN_STATUS, .dlc = 8, .data = {b0, b1} };
+    return f;
+}
+
+/* IgnState 0~3 전부 (테이블 기반) */
+static void test_ign_all_states(void) {
+    static const struct { uint8_t raw; IgnState expected; } cases[] = {
+        { 0, IGN_OFF }, { 1, IGN_ACC }, { 2, IGN_ON }, { 3, IGN_START },
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        CanFrame f = ign_frame(cases[i].raw, 0x00);
+        IgnStatus s;
+        ASSERT_TRUE(decode_ign_status(&f, &s));
+        ASSERT_EQ(cases[i].expected, s.ign);
+    }
+}
+
+/* Gear 0~3은 그대로, 4~7은 GEAR_INVALID (테이블 기반) */
+static void test_gear_all_values(void) {
+    static const struct { uint8_t raw; Gear expected; } cases[] = {
+        { 0, GEAR_P }, { 1, GEAR_R }, { 2, GEAR_N }, { 3, GEAR_D },
+        { 4, GEAR_INVALID }, { 5, GEAR_INVALID }, { 6, GEAR_INVALID }, { 7, GEAR_INVALID },
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        CanFrame f = ign_frame(0x02, cases[i].raw);
+        IgnStatus s;
+        ASSERT_TRUE(decode_ign_status(&f, &s));     /* 기어가 무효여도 프레임 해석은 성공 */
+        ASSERT_EQ(cases[i].expected, s.gear);
+    }
+}
+
+static void test_ign_spec_example(void) {
+    CanFrame f = ign_frame(0x02, 0x03);             /* 정의서 예시 4: ON, D */
+    IgnStatus s;
+    ASSERT_TRUE(decode_ign_status(&f, &s));
+    ASSERT_EQ(IGN_ON, s.ign);
+    ASSERT_EQ(GEAR_D, s.gear);
+}
+
+static void test_ign_exercise_e(void) {
+    CanFrame f = ign_frame(0x03, 0x07);             /* M1-3 연습 문제 E: START, 기어 무효 */
+    IgnStatus s;
+    ASSERT_TRUE(decode_ign_status(&f, &s));
+    ASSERT_EQ(IGN_START, s.ign);
+    ASSERT_EQ(GEAR_INVALID, s.gear);
+}
+
+static void test_ign_ignores_reserved_bits(void) {
+    /* data[0] = 1111 1110 → IgnState(아래 2비트) = 2, data[1] = 1111 1001 → Gear(아래 3비트) = 1 */
+    CanFrame f = ign_frame(0xFE, 0xF9);
+    IgnStatus s;
+    ASSERT_TRUE(decode_ign_status(&f, &s));
+    ASSERT_EQ(IGN_ON, s.ign);
+    ASSERT_EQ(GEAR_R, s.gear);
+}
+
+static void test_ign_cannot_decode(void) {
+    IgnStatus s;
+    CanFrame dlc1  = { .id = MSG_ID_IGN_STATUS, .dlc = 1, .data = {0x02} };   /* 기어(data[1]) 없음 */
+    CanFrame wrong = { .id = MSG_ID_DOOR_STATUS, .dlc = 8, .data = {0x02, 0x03} };
+    CanFrame f = ign_frame(0x02, 0x03);
+    ASSERT_FALSE(decode_ign_status(&dlc1, &s));
+    ASSERT_FALSE(decode_ign_status(&wrong, &s));
+    ASSERT_FALSE(decode_ign_status(NULL, &s));
+    ASSERT_FALSE(decode_ign_status(&f, NULL));
+}
+
+static void test_enum_names(void) {
+    ASSERT_STR_EQ("OFF", ign_state_name(IGN_OFF));
+    ASSERT_STR_EQ("START", ign_state_name(IGN_START));
+    ASSERT_STR_EQ("P", gear_name(GEAR_P));
+    ASSERT_STR_EQ("D", gear_name(GEAR_D));
+    ASSERT_STR_EQ("INVALID", gear_name(GEAR_INVALID));
+
+    /* C의 enum은 그냥 정수 → 정의 안 된 9도 강제로 넣을 수 있다 (Java라면 불가능) */
+    ASSERT_STR_EQ("UNKNOWN", gear_name((Gear)9));
+    ASSERT_STR_EQ("UNKNOWN", ign_state_name((IgnState)9));
+}
+
+static void test_ign_format(void) {
+    char buf[32];
+    IgnStatus s = { .ign = IGN_ON, .gear = GEAR_D };
+    ign_status_format(&s, buf, sizeof(buf));
+    ASSERT_STR_EQ("IGN=ON GEAR=D", buf);
+}
+
 int main(void) {
     printf("[test_signals]\n");
     RUN_TEST(test_speed_zero);
@@ -220,5 +309,14 @@ int main(void) {
     RUN_TEST(test_door_ignores_reserved_bits);
     RUN_TEST(test_door_cannot_decode);
     RUN_TEST(test_door_format);
+
+    RUN_TEST(test_ign_all_states);
+    RUN_TEST(test_gear_all_values);
+    RUN_TEST(test_ign_spec_example);
+    RUN_TEST(test_ign_exercise_e);
+    RUN_TEST(test_ign_ignores_reserved_bits);
+    RUN_TEST(test_ign_cannot_decode);
+    RUN_TEST(test_enum_names);
+    RUN_TEST(test_ign_format);
     return TEST_SUMMARY();
 }
