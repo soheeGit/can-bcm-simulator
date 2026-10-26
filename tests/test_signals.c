@@ -110,6 +110,95 @@ static void test_speed_format(void) {
     ASSERT_STR_EQ("INVALID", buf);
 }
 
+/* ========== 0x200 DOOR_STATUS (M2-4) ========== */
+
+static CanFrame door_frame(uint8_t b0) {
+    CanFrame f = { .id = MSG_ID_DOOR_STATUS, .dlc = 8, .data = {b0} };
+    return f;
+}
+
+static void test_door_all_closed(void) {
+    CanFrame f = door_frame(0x00);
+    DoorStatus d;
+    ASSERT_TRUE(decode_door_status(&f, &d));
+    ASSERT_FALSE(d.fl);
+    ASSERT_FALSE(d.fr);
+    ASSERT_FALSE(d.rl);
+    ASSERT_FALSE(d.rr);
+    ASSERT_FALSE(d.trunk);
+    ASSERT_FALSE(door_any_open(&d));
+}
+
+/* 하나만 열림 × 5가지: 표(table)로 정의하고 반복문으로 검사 (테이블 기반 테스트, M4-7 예고) */
+static void test_door_one_open_each(void) {
+    static const struct {
+        uint8_t    data0;
+        DoorStatus expected;
+    } cases[] = {
+        { 0x01, { .fl = true } },      /* bit 0 */
+        { 0x02, { .fr = true } },      /* bit 1 */
+        { 0x04, { .rl = true } },      /* bit 2 */
+        { 0x08, { .rr = true } },      /* bit 3 */
+        { 0x10, { .trunk = true } },   /* bit 4 */
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        CanFrame f = door_frame(cases[i].data0);
+        DoorStatus d;
+        ASSERT_TRUE(decode_door_status(&f, &d));
+        ASSERT_EQ(cases[i].expected.fl,    d.fl);
+        ASSERT_EQ(cases[i].expected.fr,    d.fr);
+        ASSERT_EQ(cases[i].expected.rl,    d.rl);
+        ASSERT_EQ(cases[i].expected.rr,    d.rr);
+        ASSERT_EQ(cases[i].expected.trunk, d.trunk);
+        ASSERT_TRUE(door_any_open(&d));
+    }
+}
+
+static void test_door_all_open(void) {
+    CanFrame f = door_frame(0x1F);                     /* 0001 1111 */
+    DoorStatus d;
+    ASSERT_TRUE(decode_door_status(&f, &d));
+    ASSERT_TRUE(d.fl && d.fr && d.rl && d.rr && d.trunk);
+}
+
+static void test_door_spec_example(void) {
+    CanFrame f = door_frame(0x11);                     /* 정의서 예시 3: FL + 트렁크 */
+    DoorStatus d;
+    ASSERT_TRUE(decode_door_status(&f, &d));
+    ASSERT_TRUE(d.fl);
+    ASSERT_FALSE(d.fr);
+    ASSERT_TRUE(d.trunk);
+}
+
+static void test_door_ignores_reserved_bits(void) {
+    /* bit 5~63은 예약. 1로 가득 차 있어도 도어는 전부 닫힘이어야 한다 */
+    CanFrame f = { .id = MSG_ID_DOOR_STATUS, .dlc = 8,
+                   .data = {0xE0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF} };   /* 1110 0000 */
+    DoorStatus d;
+    ASSERT_TRUE(decode_door_status(&f, &d));
+    ASSERT_FALSE(door_any_open(&d));
+}
+
+static void test_door_cannot_decode(void) {
+    DoorStatus d;
+    CanFrame dlc0  = { .id = MSG_ID_DOOR_STATUS, .dlc = 0 };
+    CanFrame wrong = { .id = MSG_ID_VEHICLE_SPEED, .dlc = 8, .data = {0x01} };
+    CanFrame f = door_frame(0x01);
+    ASSERT_FALSE(decode_door_status(&dlc0, &d));       /* DLC 0: data[0]이 없음 */
+    ASSERT_FALSE(decode_door_status(&wrong, &d));      /* 다른 ID */
+    ASSERT_FALSE(decode_door_status(NULL, &d));
+    ASSERT_FALSE(decode_door_status(&f, NULL));
+    ASSERT_FALSE(door_any_open(NULL));
+}
+
+static void test_door_format(void) {
+    char buf[64];
+    DoorStatus d = { .fl = true, .trunk = true };
+    door_status_format(&d, buf, sizeof(buf));
+    ASSERT_STR_EQ("FL=1 FR=0 RL=0 RR=0 TRUNK=1", buf);
+}
+
 int main(void) {
     printf("[test_signals]\n");
     RUN_TEST(test_speed_zero);
@@ -123,5 +212,13 @@ int main(void) {
     RUN_TEST(test_speed_invalid_frame);
     RUN_TEST(test_speed_null);
     RUN_TEST(test_speed_format);
+
+    RUN_TEST(test_door_all_closed);
+    RUN_TEST(test_door_one_open_each);
+    RUN_TEST(test_door_all_open);
+    RUN_TEST(test_door_spec_example);
+    RUN_TEST(test_door_ignores_reserved_bits);
+    RUN_TEST(test_door_cannot_decode);
+    RUN_TEST(test_door_format);
     return TEST_SUMMARY();
 }

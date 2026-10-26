@@ -45,4 +45,34 @@ bool decode_vehicle_speed(const CanFrame *f, VehicleSpeed *out);
 /* "100.00 km/h" / "INVALID" 형태의 문자열로 만든다 (로그용, float 없이 정수로) */
 void vehicle_speed_format(const VehicleSpeed *s, char *buf, size_t size);
 
+/* ---------- 0x200 DOOR_STATUS ---------- */
+
+#define DOOR_STATUS_MIN_DLC  1u    /* 최소 길이: data[0] */
+#define DOOR_FL_BIT          0u    /* 운전석 */
+#define DOOR_FR_BIT          1u    /* 조수석 */
+#define DOOR_RL_BIT          2u    /* 뒷좌석 왼쪽 */
+#define DOOR_RR_BIT          3u    /* 뒷좌석 오른쪽 */
+#define DOOR_TRUNK_BIT       4u    /* 트렁크 */
+#define DOOR_SIGNAL_LENGTH   1u    /* 신호마다 1비트 */
+
+/* 도어 상태 (true = 열림). ADR-001: 비트필드가 아니라 bool 구조체 */
+typedef struct {
+    bool fl;
+    bool fr;
+    bool rl;
+    bool rr;
+    bool trunk;
+} DoorStatus;
+
+/* 0x200 프레임에서 도어 상태를 꺼낸다.
+ * 반환값: 해석할 수 있으면 true (false: NULL, 유효하지 않은 프레임, ID가 0x200이 아님, DLC < 1) */
+bool decode_door_status(const CanFrame *f, DoorStatus *out);
+
+/* 문 4개 또는 트렁크 중 하나라도 열려 있으면 true (주행 중 경고 판단용, M4)
+ * d가 NULL이면 false */
+bool door_any_open(const DoorStatus *d);
+
+/* "FL=1 FR=0 RL=0 RR=0 TRUNK=1" 형태의 문자열로 만든다 (로그용) */
+void door_status_format(const DoorStatus *d, char *buf, size_t size);
+
 #endif

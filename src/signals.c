@@ -45,3 +45,51 @@ void vehicle_speed_format(const VehicleSpeed *s, char *buf, size_t size) {
     /* 10000 → "100" + "." + "00". float 없이 정수 나눗셈/나머지로 */
     snprintf(buf, size, "%u.%02u km/h", (unsigned)(s->centi_kmh / 100u), (unsigned)(s->centi_kmh % 100u));
 }
+
+/* ---------- 0x200 DOOR_STATUS ---------- */
+
+/* 1비트 신호 하나를 bool로 */
+static bool get_flag(const uint8_t data[CAN_FRAME_MAX_DLC], uint8_t bit) {
+    return can_get_bits(data, bit, DOOR_SIGNAL_LENGTH) != 0u;
+}
+
+bool decode_door_status(const CanFrame *f, DoorStatus *out) {
+    if (f == NULL || out == NULL) {
+        return false;
+    }
+    if (!can_frame_is_valid(f)) {
+        return false;
+    }
+    if (f->id != MSG_ID_DOOR_STATUS) {
+        return false;
+    }
+    if (f->dlc < DOOR_STATUS_MIN_DLC) {
+        return false;
+    }
+
+    out->fl    = get_flag(f->data, DOOR_FL_BIT);
+    out->fr    = get_flag(f->data, DOOR_FR_BIT);
+    out->rl    = get_flag(f->data, DOOR_RL_BIT);
+    out->rr    = get_flag(f->data, DOOR_RR_BIT);
+    out->trunk = get_flag(f->data, DOOR_TRUNK_BIT);
+    return true;
+}
+
+bool door_any_open(const DoorStatus *d) {
+    if (d == NULL) {
+        return false;
+    }
+    return d->fl || d->fr || d->rl || d->rr || d->trunk;
+}
+
+void door_status_format(const DoorStatus *d, char *buf, size_t size) {
+    if (buf == NULL || size == 0u) {
+        return;
+    }
+    if (d == NULL) {
+        snprintf(buf, size, "(null)");
+        return;
+    }
+    snprintf(buf, size, "FL=%d FR=%d RL=%d RR=%d TRUNK=%d",
+             d->fl, d->fr, d->rl, d->rr, d->trunk);
+}
