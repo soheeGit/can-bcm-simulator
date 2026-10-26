@@ -27,4 +27,13 @@
  * 인자는 정의서의 상수에서 오므로, 잘못된 인자는 "프로그래머 실수"다 → 테스트로 잡는다. */
 uint32_t can_get_bits(const uint8_t data[CAN_FRAME_MAX_DLC], uint8_t start_bit, uint8_t length);
 
+/* data[8]의 start_bit부터 length비트 자리에 value를 넣는다 (Intel/Little-endian).
+ * can_get_bits()의 반대 방향. 그 자리 밖의 비트는 절대 바꾸지 않는다.
+ *
+ * 예: BcmState(start 0, 길이 2)에 2(WARNING) → data[0]의 아래 2비트만 10으로
+ *
+ * - value가 length비트보다 크면 아래 length비트만 넣는다 (넘치는 비트가 옆 신호를 망가뜨리지 않게)
+ * - 인자가 잘못되면(can_get_bits와 같은 조건) 아무것도 바꾸지 않는다 */
+void can_set_bits(uint8_t data[CAN_FRAME_MAX_DLC], uint8_t start_bit, uint8_t length, uint32_t value);
+
 #endif
