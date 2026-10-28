@@ -1,42 +1,62 @@
 #include <stdio.h>
 
-#include "can_frame.h"
+#include "cli.h"
 #include "dispatcher.h"
+#include "log_reader.h"
+#include "logger.h"
 #include "signals.h"
+#include "version.h"
 
-int main(void) {
-    printf("can-bcm-simulator v0.0.1\n\n");
+/* 종료 코드: 0 = 성공, 1 = 실행 중 실패(파일을 못 엶 등), 2 = 사용법이 틀림 */
+#define EXIT_OK     0
+#define EXIT_FAIL   1
+#define EXIT_USAGE  2
 
-    /* 확인용 샘플 시나리오 (M3에서 로그 파일 처리로 바뀔 예정) */
-    static const struct { uint32_t t; CanFrame f; } samples[] = {
-        {   0, { .id = MSG_ID_IGN_STATUS,    .dlc = 8, .data = {0x02, 0x03} } },   /* ON, D */
-        { 100, { .id = MSG_ID_VEHICLE_SPEED, .dlc = 8, .data = {0x10, 0x27} } },   /* 100.00 km/h */
-        { 150, { .id = 0x555,                .dlc = 8, .data = {0xAA} } },         /* 관심 없음 */
-        { 200, { .id = MSG_ID_DOOR_STATUS,   .dlc = 8, .data = {0x01} } },         /* 운전석 열림 */
-        { 250, { .id = MSG_ID_VEHICLE_SPEED, .dlc = 1, .data = {0x00} } },         /* 깨진 프레임 */
-    };
+static void print_summary(const LogReadStats *stats, const VehicleInputs *in) {
+    char speed_str[32], door_str[64], ign_str[32];
+    vehicle_speed_format(&in->speed, speed_str, sizeof(speed_str));
+    door_status_format(&in->doors, door_str, sizeof(door_str));
+    ign_status_format(&in->ign, ign_str, sizeof(ign_str));
 
-    VehicleInputs in;
-    DispatchStats stats = {0};
-    vehicle_inputs_init(&in);
+    printf("\n결과\n");
+    printf("  read %u, ok %u, error %u  (빈 줄/주석 %u)\n",
+           stats->lines, stats->frames, stats->parse_errors, stats->skipped);
+    printf("  디스패처: ok=%u ignored=%u error=%u\n",
+           stats->dispatch.ok, stats->dispatch.ignored, stats->dispatch.error);
+    printf("\n최종 차량 상태\n");
+    printf("  차속 : %s\n", speed_str);
+    printf("  도어 : %s\n", door_str);
+    printf("  시동 : %s\n", ign_str);
+}
 
-    for (size_t i = 0; i < sizeof(samples) / sizeof(samples[0]); i++) {
-        char frame_str[CAN_FRAME_STR_SIZE];
-        can_frame_format(&samples[i].f, frame_str, sizeof(frame_str));
-        DispatchResult r = can_dispatch(&samples[i].f, &in, samples[i].t, &stats);
-        printf("[%4u ms] RX %-36s → %s\n", samples[i].t, frame_str, dispatch_result_name(r));
+int main(int argc, char *argv[]) {
+    CliOptions opts;
+    switch (cli_parse(argc, argv, &opts, stderr)) {
+        case CLI_OK:
+            break;
+        case CLI_HELP:
+            cli_print_usage(stdout, argv[0]);
+            return EXIT_OK;
+        case CLI_VERSION:
+            printf("can-bcm-simulator %s\n", BCM_SIM_VERSION);
+            return EXIT_OK;
+        case CLI_ERROR:
+        default:
+            fprintf(stderr, "도움말: %s --help\n", argv[0]);
+            return EXIT_USAGE;
     }
 
-    char speed_str[32], door_str[64], ign_str[32];
-    vehicle_speed_format(&in.speed, speed_str, sizeof(speed_str));
-    door_status_format(&in.doors, door_str, sizeof(door_str));
-    ign_status_format(&in.ign, ign_str, sizeof(ign_str));
+    log_set_level(opts.log_level);
+    LOG_INFO("can-bcm-simulator %s 시작: %s (로그 레벨 %s)",
+             BCM_SIM_VERSION, opts.file, log_level_name(opts.log_level));
 
-    printf("\n현재 차량 상태\n");
-    printf("  차속  : %s\n", speed_str);
-    printf("  도어  : %s\n", door_str);
-    printf("  시동  : %s\n", ign_str);
-    printf("  통계  : ok=%u ignored=%u error=%u\n", stats.ok, stats.ignored, stats.error);
+    VehicleInputs in;
+    LogReadStats stats;
+    vehicle_inputs_init(&in);
 
-    return 0;
+    if (log_read_file(opts.file, &in, &stats) != 0) {
+        return EXIT_FAIL;
+    }
+    print_summary(&stats, &in);
+    return EXIT_OK;
 }

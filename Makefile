@@ -19,7 +19,10 @@ TEST_BUILD := $(BUILD)/tests
 TEST_SRCS  := $(wildcard tests/test_*.c)
 TEST_BINS  := $(patsubst tests/%.c,$(TEST_BUILD)/%,$(TEST_SRCS))
 
-.PHONY: all debug test clean
+# make scenarios: tools/gen_scenarios.c로 data/scenarios/*.log를 다시 만든다 (M3-4)
+GEN_SCENARIOS := $(BUILD)/gen_scenarios
+
+.PHONY: all debug test clean scenarios
 
 all: $(TARGET)
 
@@ -54,6 +57,12 @@ test: $(TEST_BINS)
 # 테스트 빌드: tests/test_xxx.c + main.o를 뺀 src의 .o들 → build/tests/test_xxx
 $(TEST_BUILD)/%: tests/%.c $(LIB_OBJS) | $(TEST_BUILD)
 	$(CC) $(CFLAGS) -Itests $^ -o $@
+
+scenarios: $(GEN_SCENARIOS)
+	./$(GEN_SCENARIOS) data/scenarios
+
+$(GEN_SCENARIOS): tools/gen_scenarios.c $(LIB_OBJS) | $(BUILD)
+	$(CC) $(CFLAGS) $^ -o $@
 
 clean:
 	rm -rf $(BUILD)
