@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "log_reader.h"
+#include "logger.h"
 #include "test_framework.h"
 
 /* 문자열을 임시 파일에 써서 "파일처럼" log_read_stream()에 넘긴다
@@ -15,7 +16,7 @@ static int read_text(const char *text, VehicleInputs *in, LogReadStats *stats) {
     fputs(text, f);
     rewind(f);                                     /* 쓴 다음 처음으로 되감기 */
     vehicle_inputs_init(in);
-    int r = log_read_stream(f, in, stats, NULL);   /* 오류 메시지는 테스트에서는 안 찍음 */
+    int r = log_read_stream(f, in, stats);
     fclose(f);
     return r;
 }
@@ -135,7 +136,7 @@ static void test_file_not_found(void) {
     VehicleInputs in;
     LogReadStats s;
     vehicle_inputs_init(&in);
-    ASSERT_EQ(-1, log_read_file("no_such_file.log", &in, &s, NULL));
+    ASSERT_EQ(-1, log_read_file("no_such_file.log", &in, &s));
 }
 
 static void test_file_example(void) {
@@ -143,7 +144,7 @@ static void test_file_example(void) {
     VehicleInputs in;
     LogReadStats s;
     vehicle_inputs_init(&in);
-    ASSERT_EQ(0, log_read_file("data/examples/mixed.log", &in, &s, NULL));
+    ASSERT_EQ(0, log_read_file("data/examples/mixed.log", &in, &s));
     ASSERT_EQ(16, s.lines);
     ASSERT_EQ(4, s.parse_errors);                /* 10G7, 타임스탬프 없음, R, 너무 긴 줄 */
     ASSERT_EQ(7, s.frames);
@@ -153,12 +154,13 @@ static void test_file_example(void) {
 static void test_null_args(void) {
     VehicleInputs in;
     LogReadStats s;
-    ASSERT_EQ(-1, log_read_stream(NULL, &in, &s, NULL));
-    ASSERT_EQ(-1, log_read_file(NULL, &in, &s, NULL));
+    ASSERT_EQ(-1, log_read_stream(NULL, &in, &s));
+    ASSERT_EQ(-1, log_read_file(NULL, &in, &s));
 }
 
 int main(void) {
     printf("[test_log_reader]\n");
+    log_set_level(LOG_LEVEL_OFF);                  /* 테스트 중에는 로그를 안 찍는다 */
     RUN_TEST(test_read_all_good);
     RUN_TEST(test_read_mixed_continues_after_errors);
     RUN_TEST(test_read_skips_blank_and_comments);
