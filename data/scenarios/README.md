@@ -4,11 +4,11 @@ BCM 상태 머신(M4)을 검증하기 위한 주행 시나리오. **TDD의 인�
 
 - 형식: `docs/log-format.md` (candump `-l`). **주석 없음** (M3-1 결정)
 - 생성: `make scenarios` (`tools/gen_scenarios.c`가 `can_set_bits()`로 만든다. 손으로 고치지 말고 생성기를 고칠 것)
-- 실행: `./build/bcm_sim data/scenarios/01_normal_drive.log`
+- 실행: `./build/bcm_sim --file data/scenarios/01_normal_drive.log`
 - 모든 메시지는 100ms 주기 (0x300 → 0x200 → 0x100 순서). 시각은 0초부터
 
-> 아래 "기대 BCM 동작"은 M4-1 상태 전이 표 **초안** 기준이다.
-> 규칙(초안): IDLE → **DRIVING_LOCKED**: 시동 ON + 15 km/h 이상 + 문 전부 닫힘 / DRIVING_LOCKED → **WARNING**: 문 열림 + 3 km/h 초과 / WARNING → DRIVING_LOCKED: 문 전부 닫힘 + 3 km/h 초과 / → **IDLE**: 0 km/h + P단, 또는 시동 OFF / 필수 신호 타임아웃(500ms) → **WARNING**(Fail-safe)
+> 아래 "기대 BCM 동작"은 [docs/fsm-design.md](../../docs/fsm-design.md)의 상태 전이 표(T1~T11) 기준이다 (M4-1에서 확정).
+> 요약: IDLE → **DRIVING_LOCKED**: 시동 ON + 15 km/h 이상 + 문 전부 닫힘 / DRIVING_LOCKED → **WARNING**: 문 열림 + 3 km/h 초과, 또는 신호 이상(Fail-safe) / WARNING → 문 전부 닫히면 원래 상태로 / → **IDLE**: 0 km/h + P단, 또는 시동 OFF/ACC
 
 ## 01_normal_drive.log — 정상 주행
 
@@ -56,7 +56,7 @@ BCM 상태 머신(M4)을 검증하기 위한 주행 시나리오. **TDD의 인�
 | 7.5초 / 8.0초 | P / 시동 OFF |
 
 - 줄 수: 248 (차속 10줄 빠짐), 오류 0
-- **기대 BCM 동작:** 1.3초 DRIVING_LOCKED → 마지막 수신(2.9초)에서 500ms가 지난 **약 3.4 ~ 3.5초에 타임아웃 감지 → WARNING (Fail-safe)** → **4.0초 차속 복귀 → DRIVING_LOCKED** → 7.5초 IDLE
+- **기대 BCM 동작:** 1.3초 DRIVING_LOCKED → 마지막 수신(2.9초)에서 500ms를 넘긴 **3.5초에 타임아웃 감지 → WARNING (Fail-safe)** → **4.0초 차속 복귀 → DRIVING_LOCKED** → 7.5초 IDLE
 - 핵심: 마지막 차속(50 km/h)을 계속 믿으면 안 된다. "모름"이 됐다는 걸 알아채야 한다 (M4-6)
 
 ## 04_invalid_frames.log — 이상한 프레임 섞임 (파일 모드 전용)
@@ -77,7 +77,7 @@ BCM 상태 머신(M4)을 검증하기 위한 주행 시나리오. **TDD의 인�
 | 2.41초 | `400#01010000...` (우리 BCM 메시지) | 디스패처 IGNORED |
 
 - 줄 수: 137 (정상 129 + 끼워 넣은 8), 실행 결과: `read 137, ok 133, error 4`, 디스패처 `ok=129 ignored=2 error=2`
-- **기대 BCM 동작:** 0.8초 DRIVING_LOCKED. 깨진 줄로는 상태가 바뀌지 않는다. 1.8초(차속 무효), 2.2초(기어 무효)에 대한 반응은 M4-6에서 정한다 (Fail-safe 후보)
+- **기대 BCM 동작:** 0.8초 DRIVING_LOCKED → **1.8초 WARNING** (차속 무효 = 신호 이상, Fail-safe) → **1.9초 DRIVING_LOCKED** (정상 차속 복귀). 2.2초 기어 무효는 상태 변화 없음 (기어는 정차 후 IDLE 복귀 판단에만 쓴다). 깨진 줄로는 상태가 바뀌지 않는다
 - ⚠️ can-utils(`log2long`, `canplayer`)는 첫 깨진 줄에서 멈춘다 → **M5 재생에는 01~03만** 쓴다
 
 ## 정리
