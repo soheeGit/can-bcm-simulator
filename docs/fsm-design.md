@@ -146,7 +146,7 @@ stateDiagram-v2
 | 01 정상 주행 | 0.0 IDLE → **1.8 DRIVING_LOCKED** (잠금 1회) → **9.5 IDLE** | T3, T7 |
 | 02 주행 중 문 열림 | 1.8 DRIVING_LOCKED → **4.0 WARNING** → **5.0 DRIVING_LOCKED** → 9.5 IDLE | T3, T6, T9, T7 |
 | 03 차속 끊김 | 1.3 DRIVING_LOCKED → **3.5 WARNING** (2.9 마지막 수신 + 500ms 초과) → **4.0 DRIVING_LOCKED** → 7.5 IDLE | T3, T5, T9, T7 |
-| 04 이상한 프레임 | 0.8 DRIVING_LOCKED → **1.8 WARNING** (차속 0xFFFF) → **1.9 DRIVING_LOCKED** → 2.2 기어 무효는 변화 없음 → (끝까지 DRIVING_LOCKED) | T3, T5, T9 |
+| 04 이상한 프레임 | 0.8 DRIVING_LOCKED → **1.8 WARNING** (차속 0xFFFF) → **1.9 DRIVING_LOCKED** → 2.2 기어 무효는 변화 없음 → 3.8 IDLE (정차 + P) | T3, T5, T9, T7 |
 
 - 03: 3.4초에는 경과 시간이 정확히 500ms라 아직 끊김이 아니다 (`> 500`). 3.5초에 0x300이 들어올 때 600ms → 끊김
 - 04: 깨진 줄(파싱 실패, DLC 부족)은 디스패처가 값을 바꾸지 않으므로(M2-6) FSM도 반응하지 않는다
@@ -163,3 +163,4 @@ stateDiagram-v2
 | 이슈 | 내용 |
 | --- | --- |
 | M4-1 | 최초 작성. 초안 표를 검토해 T1~T11로 확정, `locked` 기억 추가 |
+| M4-3 | 구현 후 시나리오 04의 기대 결과 수정 (3.8초 IDLE 누락). 알 수 없는 상태는 `RESET`으로 IDLE 복귀 |

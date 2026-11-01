@@ -77,7 +77,7 @@ BCM 상태 머신(M4)을 검증하기 위한 주행 시나리오. **TDD의 인�
 | 2.41초 | `400#01010000...` (우리 BCM 메시지) | 디스패처 IGNORED |
 
 - 줄 수: 137 (정상 129 + 끼워 넣은 8), 실행 결과: `read 137, ok 133, error 4`, 디스패처 `ok=129 ignored=2 error=2`
-- **기대 BCM 동작:** 0.8초 DRIVING_LOCKED → **1.8초 WARNING** (차속 무효 = 신호 이상, Fail-safe) → **1.9초 DRIVING_LOCKED** (정상 차속 복귀). 2.2초 기어 무효는 상태 변화 없음 (기어는 정차 후 IDLE 복귀 판단에만 쓴다). 깨진 줄로는 상태가 바뀌지 않는다
+- **기대 BCM 동작:** 0.8초 DRIVING_LOCKED → **1.8초 WARNING** (차속 무효 = 신호 이상, Fail-safe) → **1.9초 DRIVING_LOCKED** (정상 차속 복귀) → 3.8초 IDLE (정차 + P). 2.2초 기어 무효는 상태 변화 없음 (기어는 정차 후 IDLE 복귀 판단에만 쓴다). 깨진 줄로는 상태가 바뀌지 않는다
 - ⚠️ can-utils(`log2long`, `canplayer`)는 첫 깨진 줄에서 멈춘다 → **M5 재생에는 01~03만** 쓴다
 
 ## 정리
