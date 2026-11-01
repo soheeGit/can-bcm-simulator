@@ -1,5 +1,5 @@
 CC     := gcc
-CFLAGS := -std=c11 -Wall -Wextra -Werror -g -Iinclude
+CFLAGS := -std=c11 -Wall -Wextra -Wswitch-enum -Werror -g -Iinclude
 
 BUILD  := build
 TARGET := $(BUILD)/bcm_sim

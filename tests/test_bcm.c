@@ -3,7 +3,40 @@
 #include "bcm.h"
 #include "test_framework.h"
 
-/* M4-2: 헤더의 모양(타입, 초기값, 출력 규칙)만 확인한다. 전이 표 테스트는 M4-3, M4-7 */
+/* 전이 표(docs/fsm-design.md 4번)의 규칙마다 테스트한다.
+ * 모든 줄을 표 하나로 정리하는 건 M4-7 (table-driven) */
+
+#define NOW 10000u   /* 테스트 시각: 10초 */
+
+/* ---------- 테스트용 입력 만들기 ---------- */
+
+/* "시동 ON, 기어 D, 문 전부 닫힘, 차속 centi"를 방금(NOW) 받은 입력. 필요한 곳만 고쳐서 쓴다 */
+static VehicleInputs driving(uint16_t centi) {
+    VehicleInputs in;
+    vehicle_inputs_init(&in);
+    in.ign.ign = IGN_ON;
+    in.ign.gear = GEAR_D;
+    in.speed.valid = true;
+    in.speed.centi_kmh = centi;
+    in.ign_received = true;
+    in.speed_received = true;
+    in.doors_received = true;
+    in.ign_rx_ms = NOW;
+    in.speed_rx_ms = NOW;
+    in.doors_rx_ms = NOW;
+    return in;
+}
+
+/* 원하는 상태에서 시작해서 판단 한 번 (given: ctx, when: bcm_step) */
+static BcmOutputs step_from(BcmContext *ctx, BcmState state, bool locked, const VehicleInputs *in) {
+    ctx->state = state;
+    ctx->locked = locked;
+    BcmOutputs out;
+    bcm_step(ctx, in, NOW, &out);
+    return out;
+}
+
+/* ---------- 모양 (M4-2) ---------- */
 
 static void test_state_values_match_0x400(void) {
     /* signal-spec.md 0x400 BcmState: 0 = IDLE, 1 = DRIVING_LOCKED, 2 = WARNING */
@@ -29,27 +62,6 @@ static void test_init(void) {
     ASSERT_FALSE(ctx.locked);
 }
 
-static void test_outputs_follow_state(void) {
-    /* 껍데기 bcm_step: 상태는 그대로, 출력은 상태에 맞게 채워진다 */
-    VehicleInputs in;
-    vehicle_inputs_init(&in);
-    BcmContext ctx;
-    bcm_init(&ctx);
-    BcmOutputs out;
-
-    bcm_step(&ctx, &in, 0u, &out);
-    ASSERT_EQ(BCM_STATE_IDLE, out.state);
-    ASSERT_EQ(BCM_STATE_IDLE, out.prev_state);
-    ASSERT_FALSE(out.state_changed);
-    ASSERT_FALSE(out.warning_buzzer);
-    ASSERT_FALSE(out.door_lock_cmd);
-    ASSERT_EQ(BCM_RULE_NONE, out.rule);
-
-    ctx.state = BCM_STATE_WARNING;   /* 테스트에서는 ctx를 직접 만들 수 있다 (전역 변수가 아니라서) */
-    bcm_step(&ctx, &in, 0u, &out);
-    ASSERT_TRUE(out.warning_buzzer); /* Moore: WARNING이면 경고음 */
-}
-
 static void test_null_args(void) {
     VehicleInputs in;
     vehicle_inputs_init(&in);
@@ -73,6 +85,245 @@ static void test_names(void) {
     ASSERT_TRUE(strcmp("-", bcm_rule_name(BCM_RULE_NONE)) == 0);
     ASSERT_TRUE(strcmp("T3", bcm_rule_name(BCM_RULE_T3)) == 0);
     ASSERT_TRUE(strcmp("T11", bcm_rule_name(BCM_RULE_T11)) == 0);
+    ASSERT_TRUE(strcmp("RESET", bcm_rule_name(BCM_RULE_RESET)) == 0);
+    ASSERT_TRUE(strcmp("정차, P단", bcm_rule_reason(BCM_RULE_T7)) == 0);
+}
+
+/* ---------- T1: 모든 상태 ---------- */
+
+static void test_t1_ignition_off(void) {
+    BcmContext ctx;
+    VehicleInputs in = driving(5000u);
+    in.ign.ign = IGN_OFF;
+
+    BcmOutputs out = step_from(&ctx, BCM_STATE_DRIVING_LOCKED, true, &in);
+    ASSERT_EQ(BCM_STATE_IDLE, out.state);
+    ASSERT_EQ(BCM_RULE_T1, out.rule);
+    ASSERT_FALSE(ctx.locked);                          /* IDLE로 가면 잠금 기억을 지운다 */
+
+    out = step_from(&ctx, BCM_STATE_WARNING, false, &in);
+    ASSERT_EQ(BCM_STATE_IDLE, out.state);
+    ASSERT_FALSE(out.warning_buzzer);
+
+    in.ign.ign = IGN_ACC;                              /* ACC도 시동 꺼짐으로 본다 */
+    out = step_from(&ctx, BCM_STATE_DRIVING_LOCKED, true, &in);
+    ASSERT_EQ(BCM_RULE_T1, out.rule);
+}
+
+/* ---------- IDLE: T2 ~ T4 ---------- */
+
+static void test_t2_idle_waits_without_signals(void) {
+    BcmContext ctx;
+    VehicleInputs in;
+    vehicle_inputs_init(&in);                          /* 시동 직후: 아무 신호도 안 옴 */
+    BcmOutputs out = step_from(&ctx, BCM_STATE_IDLE, false, &in);
+    ASSERT_EQ(BCM_STATE_IDLE, out.state);
+    ASSERT_EQ(BCM_RULE_T2, out.rule);
+    ASSERT_FALSE(out.warning_buzzer);                  /* 경고음 울리지 않음 */
+
+    in = driving(5000u);
+    in.speed.valid = false;                            /* 차속 0xFFFF → 모르는 채로 잠그지 않음 */
+    out = step_from(&ctx, BCM_STATE_IDLE, false, &in);
+    ASSERT_EQ(BCM_RULE_T2, out.rule);
+    ASSERT_FALSE(out.door_lock_cmd);
+}
+
+static void test_t3_auto_lock(void) {
+    BcmContext ctx;
+    VehicleInputs in = driving(1600u);
+    BcmOutputs out = step_from(&ctx, BCM_STATE_IDLE, false, &in);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);
+    ASSERT_EQ(BCM_RULE_T3, out.rule);
+    ASSERT_TRUE(out.door_lock_cmd);
+    ASSERT_TRUE(out.state_changed);
+    ASSERT_EQ(BCM_STATE_IDLE, out.prev_state);
+    ASSERT_TRUE(ctx.locked);
+
+    in = driving(1500u);                               /* 경계: 15.00은 "이상"이라 잠금 */
+    out = step_from(&ctx, BCM_STATE_IDLE, false, &in);
+    ASSERT_EQ(BCM_RULE_T3, out.rule);
+
+    in = driving(1499u);                               /* 14.99는 아직 */
+    out = step_from(&ctx, BCM_STATE_IDLE, false, &in);
+    ASSERT_EQ(BCM_STATE_IDLE, out.state);
+    ASSERT_EQ(BCM_RULE_NONE, out.rule);
+}
+
+static void test_t4_idle_door_open_moving(void) {
+    BcmContext ctx;
+    VehicleInputs in = driving(1600u);
+    in.doors.fl = true;
+    BcmOutputs out = step_from(&ctx, BCM_STATE_IDLE, false, &in);
+    ASSERT_EQ(BCM_STATE_WARNING, out.state);
+    ASSERT_EQ(BCM_RULE_T4, out.rule);
+    ASSERT_TRUE(out.warning_buzzer);
+    ASSERT_FALSE(out.door_lock_cmd);                   /* 문이 열려 있으니 잠그지 않는다 */
+    ASSERT_FALSE(ctx.locked);
+
+    in.speed.centi_kmh = 300u;                         /* 경계: 3.00은 "초과"가 아님 */
+    out = step_from(&ctx, BCM_STATE_IDLE, false, &in);
+    ASSERT_EQ(BCM_STATE_IDLE, out.state);
+}
+
+/* ---------- DRIVING_LOCKED: T5 ~ T7 ---------- */
+
+static void test_t5_fail_safe(void) {
+    BcmContext ctx;
+    VehicleInputs in = driving(5000u);
+    in.speed_rx_ms = NOW - 600u;                       /* 차속 600ms째 안 옴 (시나리오 03) */
+    BcmOutputs out = step_from(&ctx, BCM_STATE_DRIVING_LOCKED, true, &in);
+    ASSERT_EQ(BCM_STATE_WARNING, out.state);
+    ASSERT_EQ(BCM_RULE_T5, out.rule);
+    ASSERT_TRUE(out.warning_buzzer);
+    ASSERT_TRUE(ctx.locked);                           /* 주행 중이라 잠금 기억은 유지 */
+
+    in.speed_rx_ms = NOW - 500u;                       /* 경계: 딱 500ms는 아직 끊김 아님 */
+    out = step_from(&ctx, BCM_STATE_DRIVING_LOCKED, true, &in);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);
+
+    in = driving(5000u);
+    in.speed.valid = false;                            /* 차속 0xFFFF (시나리오 04) */
+    out = step_from(&ctx, BCM_STATE_DRIVING_LOCKED, true, &in);
+    ASSERT_EQ(BCM_RULE_T5, out.rule);
+
+    in = driving(5000u);
+    in.doors_rx_ms = NOW - 1000u;                      /* 도어 신호 끊김 */
+    out = step_from(&ctx, BCM_STATE_DRIVING_LOCKED, true, &in);
+    ASSERT_EQ(BCM_RULE_T5, out.rule);
+
+    in = driving(5000u);
+    in.ign_received = false;                           /* 시동 신호를 모름 */
+    out = step_from(&ctx, BCM_STATE_DRIVING_LOCKED, true, &in);
+    ASSERT_EQ(BCM_RULE_T5, out.rule);
+}
+
+static void test_t6_door_open_while_driving(void) {
+    BcmContext ctx;
+    VehicleInputs in = driving(4000u);
+    in.doors.trunk = true;                             /* 트렁크도 문 */
+    BcmOutputs out = step_from(&ctx, BCM_STATE_DRIVING_LOCKED, true, &in);
+    ASSERT_EQ(BCM_STATE_WARNING, out.state);
+    ASSERT_EQ(BCM_RULE_T6, out.rule);
+    ASSERT_TRUE(out.warning_buzzer);
+
+    in.speed.centi_kmh = 200u;                         /* 2 km/h: 달리는 중이 아님 → 유지 */
+    out = step_from(&ctx, BCM_STATE_DRIVING_LOCKED, true, &in);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);
+    ASSERT_EQ(BCM_RULE_NONE, out.rule);
+}
+
+static void test_t7_parked(void) {
+    BcmContext ctx;
+    VehicleInputs in = driving(0u);
+    in.ign.gear = GEAR_P;
+    BcmOutputs out = step_from(&ctx, BCM_STATE_DRIVING_LOCKED, true, &in);
+    ASSERT_EQ(BCM_STATE_IDLE, out.state);
+    ASSERT_EQ(BCM_RULE_T7, out.rule);
+    ASSERT_FALSE(ctx.locked);                          /* 주행 끝: 잠금 기억 지움 */
+
+    in.ign.gear = GEAR_D;                              /* 0 km/h라도 D면 신호 대기 → 유지 */
+    out = step_from(&ctx, BCM_STATE_DRIVING_LOCKED, true, &in);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);
+
+    in.ign.gear = GEAR_INVALID;                        /* 기어를 모르면 돌아가지 않을 뿐 (Fail-safe 아님) */
+    out = step_from(&ctx, BCM_STATE_DRIVING_LOCKED, true, &in);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);
+    ASSERT_EQ(BCM_RULE_NONE, out.rule);
+}
+
+/* ---------- WARNING: T8 ~ T11 ---------- */
+
+static void test_t8_warning_holds(void) {
+    BcmContext ctx;
+    VehicleInputs in = driving(5000u);
+    in.speed_received = false;
+    BcmOutputs out = step_from(&ctx, BCM_STATE_WARNING, true, &in);
+    ASSERT_EQ(BCM_STATE_WARNING, out.state);
+    ASSERT_EQ(BCM_RULE_T8, out.rule);
+    ASSERT_TRUE(out.warning_buzzer);
+    ASSERT_FALSE(out.state_changed);
+}
+
+static void test_t9_back_to_locked(void) {
+    BcmContext ctx;
+    VehicleInputs in = driving(4000u);                 /* 문 전부 닫힘 */
+    BcmOutputs out = step_from(&ctx, BCM_STATE_WARNING, true, &in);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);
+    ASSERT_EQ(BCM_RULE_T9, out.rule);
+    ASSERT_FALSE(out.door_lock_cmd);                   /* 이미 잠겨 있으니 다시 안 보냄 */
+    ASSERT_FALSE(out.warning_buzzer);
+}
+
+static void test_t10_back_to_idle(void) {
+    BcmContext ctx;
+    VehicleInputs in = driving(2000u);
+    BcmOutputs out = step_from(&ctx, BCM_STATE_WARNING, false, &in);
+    ASSERT_EQ(BCM_STATE_IDLE, out.state);
+    ASSERT_EQ(BCM_RULE_T10, out.rule);
+
+    out = step_from(&ctx, ctx.state, ctx.locked, &in);   /* 다음 판단: IDLE + 20 km/h + 문 닫힘 → T3 */
+    ASSERT_EQ(BCM_RULE_T3, out.rule);
+    ASSERT_TRUE(out.door_lock_cmd);
+}
+
+static void test_t11_stopped(void) {
+    BcmContext ctx;
+    VehicleInputs in = driving(0u);
+    in.doors.fl = true;
+    BcmOutputs out = step_from(&ctx, BCM_STATE_WARNING, true, &in);
+    ASSERT_EQ(BCM_STATE_IDLE, out.state);
+    ASSERT_EQ(BCM_RULE_T11, out.rule);
+    ASSERT_FALSE(out.warning_buzzer);
+    ASSERT_FALSE(ctx.locked);
+}
+
+/* ---------- 우선순위, default, 1회 출력 ---------- */
+
+static void test_priority(void) {
+    BcmContext ctx;
+
+    /* 문 열림 + 차속 끊김: T5가 T6보다 위 */
+    VehicleInputs in = driving(5000u);
+    in.doors.fl = true;
+    in.speed_rx_ms = NOW - 600u;
+    BcmOutputs out = step_from(&ctx, BCM_STATE_DRIVING_LOCKED, true, &in);
+    ASSERT_EQ(BCM_RULE_T5, out.rule);
+
+    /* 문 닫힘 + 차속 끊김: T8이 T9보다 위 (왔다 갔다 하지 않게) */
+    in = driving(5000u);
+    in.speed_rx_ms = NOW - 600u;
+    out = step_from(&ctx, BCM_STATE_WARNING, true, &in);
+    ASSERT_EQ(BCM_RULE_T8, out.rule);
+
+    /* 시동 OFF + 차속 끊김: T1이 T8보다 위 */
+    in.ign.ign = IGN_OFF;
+    out = step_from(&ctx, BCM_STATE_WARNING, true, &in);
+    ASSERT_EQ(BCM_RULE_T1, out.rule);
+}
+
+static void test_unknown_state_resets(void) {
+    BcmContext ctx;
+    VehicleInputs in = driving(5000u);
+    BcmOutputs out = step_from(&ctx, (BcmState)7, true, &in);   /* 메모리가 깨졌다고 치고 */
+    ASSERT_EQ(BCM_STATE_IDLE, out.state);
+    ASSERT_EQ(BCM_RULE_RESET, out.rule);
+    ASSERT_FALSE(ctx.locked);
+}
+
+static void test_lock_cmd_only_once(void) {
+    BcmContext ctx;
+    bcm_init(&ctx);
+    VehicleInputs in = driving(1600u);
+    BcmOutputs out;
+
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_TRUE(out.door_lock_cmd);                    /* 들어가는 순간 */
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_FALSE(out.door_lock_cmd);                   /* 그다음부터는 안 냄 (Mealy) */
+    ASSERT_FALSE(out.state_changed);
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_FALSE(out.door_lock_cmd);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);
 }
 
 int main(void) {
@@ -80,8 +331,21 @@ int main(void) {
     RUN_TEST(test_state_values_match_0x400);
     RUN_TEST(test_rule_numbers_match_table);
     RUN_TEST(test_init);
-    RUN_TEST(test_outputs_follow_state);
     RUN_TEST(test_null_args);
     RUN_TEST(test_names);
+    RUN_TEST(test_t1_ignition_off);
+    RUN_TEST(test_t2_idle_waits_without_signals);
+    RUN_TEST(test_t3_auto_lock);
+    RUN_TEST(test_t4_idle_door_open_moving);
+    RUN_TEST(test_t5_fail_safe);
+    RUN_TEST(test_t6_door_open_while_driving);
+    RUN_TEST(test_t7_parked);
+    RUN_TEST(test_t8_warning_holds);
+    RUN_TEST(test_t9_back_to_locked);
+    RUN_TEST(test_t10_back_to_idle);
+    RUN_TEST(test_t11_stopped);
+    RUN_TEST(test_priority);
+    RUN_TEST(test_unknown_state_resets);
+    RUN_TEST(test_lock_cmd_only_once);
     return TEST_SUMMARY();
 }

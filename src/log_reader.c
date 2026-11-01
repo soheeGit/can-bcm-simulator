@@ -81,7 +81,18 @@ static void log_dispatch(const CanFrame *f, DispatchResult r,
     }
 }
 
-int log_read_stream(FILE *in, VehicleInputs *inputs, LogReadStats *stats) {
+/* BCM 판단 결과를 로그로: 상태가 바뀌었을 때와 잠금 명령을 냈을 때만 (INFO) */
+static void log_bcm(const BcmOutputs *out) {
+    if (out->state_changed) {
+        LOG_INFO("STATE %s -> %s (%s: %s)", bcm_state_name(out->prev_state), bcm_state_name(out->state),
+                 bcm_rule_name(out->rule), bcm_rule_reason(out->rule));
+    }
+    if (out->door_lock_cmd) {
+        LOG_INFO("도어 잠금 명령");
+    }
+}
+
+int log_read_stream(FILE *in, VehicleInputs *inputs, BcmContext *bcm, LogReadStats *stats) {
     if (in == NULL || inputs == NULL || stats == NULL) {
         return -1;
     }
@@ -134,6 +145,19 @@ int log_read_stream(FILE *in, VehicleInputs *inputs, LogReadStats *stats) {
         VehicleInputs before = *inputs;
         DispatchResult dr = can_dispatch(&frame, inputs, t_ms, &stats->dispatch);
         log_dispatch(&frame, dr, &before, inputs);
+
+        /* 5) BCM 판단 (M4-3). 디스패처가 inputs를 고친 "다음"에 부른다 */
+        if (bcm != NULL) {
+            BcmOutputs out;
+            bcm_step(bcm, inputs, t_ms, &out);
+            log_bcm(&out);
+            if (out.state_changed) {
+                stats->bcm_transitions++;
+            }
+            if (out.door_lock_cmd) {
+                stats->bcm_lock_cmds++;
+            }
+        }
     }
 
     /* fgets가 NULL을 돌려준 이유가 "파일 끝"이 아니라 "읽기 오류"인지 확인 */
@@ -144,7 +168,7 @@ int log_read_stream(FILE *in, VehicleInputs *inputs, LogReadStats *stats) {
     return 0;
 }
 
-int log_read_file(const char *path, VehicleInputs *inputs, LogReadStats *stats) {
+int log_read_file(const char *path, VehicleInputs *inputs, BcmContext *bcm, LogReadStats *stats) {
     int result = -1;
     FILE *in = NULL;
 
@@ -157,7 +181,7 @@ int log_read_file(const char *path, VehicleInputs *inputs, LogReadStats *stats) 
         goto cleanup;
     }
 
-    result = log_read_stream(in, inputs, stats);
+    result = log_read_stream(in, inputs, bcm, stats);
 
 cleanup:
     /* C에는 try-finally가 없다 → 어디서 실패하든 여기 한 곳으로 모여서 정리한다 */

@@ -58,7 +58,8 @@ typedef enum {
     BCM_RULE_T8,         /* WARNING: 신호 이상 → 유지 */
     BCM_RULE_T9,         /* WARNING: 문 닫힘 + 잠갔었음 → DRIVING_LOCKED */
     BCM_RULE_T10,        /* WARNING: 문 닫힘 + 안 잠갔었음 → IDLE */
-    BCM_RULE_T11         /* WARNING: 0 km/h → IDLE */
+    BCM_RULE_T11,        /* WARNING: 0 km/h → IDLE */
+    BCM_RULE_RESET       /* 표에 없음: ctx->state가 알 수 없는 값 → 안전 상태(IDLE)로 복귀 (default:) */
 } BcmRule;
 
 /* BCM의 기억. bcm_step이 읽고 고친다. 부르는 쪽은 직접 고치지 말 것 (테스트 제외) */
@@ -91,8 +92,11 @@ void bcm_init(BcmContext *ctx);
  * 인자 중 하나라도 NULL이면 아무것도 안 한다 */
 void bcm_step(BcmContext *ctx, const VehicleInputs *in, uint32_t now_ms, BcmOutputs *out);
 
-/* 이름 (로그용): "IDLE", "DRIVING_LOCKED", "WARNING" / "T1" ~ "T11", "-" */
+/* 이름 (로그용): "IDLE", "DRIVING_LOCKED", "WARNING" / "T1" ~ "T11", "RESET", "-" */
 const char *bcm_state_name(BcmState state);
 const char *bcm_rule_name(BcmRule rule);
+
+/* 규칙이 실행된 이유 (로그용): 예) T3 → "시동 ON, 15km/h 이상, 문 닫힘" */
+const char *bcm_rule_reason(BcmRule rule);
 
 #endif
