@@ -1,6 +1,6 @@
 /* 시나리오 로그 생성기 (M3-4)
  *
- *   make scenarios   → data/scenarios 폴더의 .log 파일 4개를 다시 만든다
+ *   make scenarios   → data/scenarios 폴더의 .log 파일 5개를 다시 만든다
  *
  * 100ms마다(정의서의 송신 주기) 0x300 → 0x200 → 0x100 프레임을 하나씩 찍는다.
  * 신호 값은 can_set_bits()(M2-2)로 정의서 위치에 넣는다 → 손으로 16진수를 계산하지 않아도 된다.
@@ -133,6 +133,21 @@ static void scenario_invalid_frames(uint32_t i, Tick *s) {
     if (i == 22u) { s->gear = 7u; }                             /* 2.2초: 기어 무효값 */
 }
 
+/* ---------- 05 15 km/h 근처에서 속도가 흔들림 (M4-4 히스테리시스) ---------- */
+/* 막히는 길: 14.90 ↔ 15.10 km/h를 100ms마다 오간다 → 잠금은 처음 한 번만, 해제되지 않아야 한다 */
+static void scenario_speed_jitter(uint32_t i, Tick *s) {
+    s->ign = (i < 5u || i >= 80u) ? 0u : 2u;                   /* 0.5초 ON, 8.0초 OFF */
+    s->gear = (i >= 10u && i < 75u) ? 3u : 0u;                 /* 1.0초 D, 7.5초 P */
+    s->doors = 0u;
+    s->send_speed = true;
+    if (i < 10u)       { s->speed = 0u; }
+    else if (i < 18u)  { s->speed = ramp(0u, 1400u, i - 10u, 8u); }            /* 1.0~1.8초 0 → 14 km/h */
+    else if (i < 48u)  { s->speed = (i % 2u == 0u) ? 1490u : 1510u; }          /* 1.8~4.7초 14.90 ↔ 15.10 */
+    else if (i < 58u)  { s->speed = ramp(1490u, KMH(30u), i - 48u, 10u); }     /* 4.8~5.8초 30 km/h까지 */
+    else if (i < 70u)  { s->speed = ramp(KMH(30u), 0u, i - 58u, 12u); }        /* 5.8~7.0초 감속 (15를 다시 지남) */
+    else               { s->speed = 0u; }
+}
+
 static void inject_invalid_lines(FILE *out, uint32_t i, uint32_t t_ms) {
     switch (i) {
         case 15u: emit_raw_line(out, t_ms + 10u, "555#AABBCCDD"); break;               /* 관심 없는 ID */
@@ -180,5 +195,6 @@ int main(int argc, char *argv[]) {
     err |= write_scenario(dir, "02_door_open_while_driving.log", scenario_door_open,       105u, false);
     err |= write_scenario(dir, "03_signal_timeout.log",          scenario_signal_timeout,  85u,  false);
     err |= write_scenario(dir, "04_invalid_frames.log",          scenario_invalid_frames,  42u,  true);
+    err |= write_scenario(dir, "05_speed_jitter.log",            scenario_speed_jitter,    85u,  false);
     return err == 0 ? 0 : 1;
 }
