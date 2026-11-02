@@ -30,11 +30,19 @@
 
 #include "dispatcher.h"
 
-/* ---------- 설정값 (fsm-design.md 3번) ---------- */
+/* ---------- 설정값 (fsm-design.md 3번, 7번) ---------- */
 
-#define BCM_LOCK_SPEED_CENTI    1500u   /* 15.00 km/h 이상이면 자동 잠금 (T3) */
-#define BCM_MOVING_SPEED_CENTI  300u    /* 3.00 km/h 초과면 "달리는 중" (T4, T6) */
-#define BCM_SIGNAL_TIMEOUT_MS   500u    /* 이보다 오래 못 받으면 신호 끊김 (100ms 주기 × 5) */
+/* 히스테리시스: 들어가는 문턱과 나오는 문턱을 멀리 떨어뜨린다 (경계에서 깜빡임 방지, M4-4)
+ *
+ *   잠금:  IDLE → DRIVING_LOCKED   차속 ≥ BCM_LOCK_SPEED_CENTI                (T3)
+ *   해제:  DRIVING_LOCKED → IDLE   차속 == BCM_STOPPED_SPEED_CENTI + P단       (T7)
+ *   경고:  → WARNING               문 열림 + 차속 > BCM_MOVING_SPEED_CENTI     (T4, T6)
+ *   경고 끝 (문 열린 채):  → IDLE   차속 == BCM_STOPPED_SPEED_CENTI             (T11)
+ */
+#define BCM_LOCK_SPEED_CENTI     1500u  /* 15.00 km/h 이상이면 자동 잠금 */
+#define BCM_STOPPED_SPEED_CENTI  0u     /* 0.00 km/h = 정차 */
+#define BCM_MOVING_SPEED_CENTI   300u   /* 3.00 km/h 초과면 "달리는 중" */
+#define BCM_SIGNAL_TIMEOUT_MS    500u   /* 이보다 오래 못 받으면 신호 끊김 (100ms 주기 × 5) */
 
 /* ---------- 상태 ---------- */
 

@@ -104,7 +104,7 @@ void bcm_step(BcmContext *ctx, const VehicleInputs *in, uint32_t now_ms, BcmOutp
                 } else if(c.door_open && c.speed > BCM_MOVING_SPEED_CENTI) {
                     next = BCM_STATE_WARNING;
                     rule = BCM_RULE_T6;
-                } else if(c.speed == 0u && c.gear == GEAR_P) {
+                } else if(c.speed == BCM_STOPPED_SPEED_CENTI && c.gear == GEAR_P) {
                     next = BCM_STATE_IDLE;
                     rule = BCM_RULE_T7;
                 }
@@ -119,7 +119,7 @@ void bcm_step(BcmContext *ctx, const VehicleInputs *in, uint32_t now_ms, BcmOutp
                 } else if (c.all_closed) {
                     next = BCM_STATE_IDLE;
                     rule = BCM_RULE_T10;
-                } else if (c.speed == 0u) {
+                } else if (c.speed == BCM_STOPPED_SPEED_CENTI) {
                     next = BCM_STATE_IDLE;
                     rule = BCM_RULE_T11;
                 }

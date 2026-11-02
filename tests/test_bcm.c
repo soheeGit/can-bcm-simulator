@@ -326,6 +326,91 @@ static void test_lock_cmd_only_once(void) {
     ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);
 }
 
+/* ---------- 히스테리시스 (M4-4) ---------- */
+
+/* 같은 BCM으로 판단을 여러 번: 차속만 바꿔 가며 count번 돌리고, 잠금 명령/상태 전이 횟수를 센다 */
+typedef struct {
+    uint32_t lock_cmds;
+    uint32_t transitions;
+    uint32_t buzzer_off_while_warning;   /* WARNING에 들어간 뒤 경고음이 꺼진 횟수 (깜빡임) */
+} JitterResult;
+
+static JitterResult run_jitter(BcmContext *ctx, VehicleInputs *in, uint16_t low, uint16_t high, uint32_t count) {
+    JitterResult r = {0u, 0u, 0u};
+    bool entered_warning = false;
+    for (uint32_t i = 0u; i < count; i++) {
+        in->speed.centi_kmh = (i % 2u == 0u) ? low : high;     /* low, high, low, high, ... */
+        BcmOutputs out;
+        bcm_step(ctx, in, NOW, &out);
+        if (out.door_lock_cmd) { r.lock_cmds++; }
+        if (out.state_changed) { r.transitions++; }
+        if (out.state == BCM_STATE_WARNING) { entered_warning = true; }
+        if (entered_warning && !out.warning_buzzer) { r.buzzer_off_while_warning++; }
+    }
+    return r;
+}
+
+static void test_hysteresis_lock_jitter(void) {
+    /* 막히는 길: 14.90 ↔ 15.10 km/h를 30번 오간다 (시나리오 05) */
+    BcmContext ctx;
+    bcm_init(&ctx);
+    VehicleInputs in = driving(0u);
+    JitterResult r = run_jitter(&ctx, &in, 1490u, 1510u, 30u);
+    ASSERT_EQ(1, r.lock_cmds);                         /* 잠금 명령은 처음 15.10에서 딱 한 번 */
+    ASSERT_EQ(1, r.transitions);                       /* IDLE → DRIVING_LOCKED 한 번뿐. 14.90에서 풀리지 않음 */
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, ctx.state);
+
+    /* 경계에 딱 붙어서: 14.99 ↔ 15.00 */
+    bcm_init(&ctx);
+    r = run_jitter(&ctx, &in, 1499u, 1500u, 30u);
+    ASSERT_EQ(1, r.lock_cmds);
+    ASSERT_EQ(1, r.transitions);
+}
+
+static void test_hysteresis_unlock_only_when_parked(void) {
+    /* 잠금 상태에서 0이 아닌 아주 느린 속도(0.01 ~ 14.99)를 오가도 풀리지 않는다. 풀리는 건 0 + P뿐 */
+    BcmContext ctx;
+    bcm_init(&ctx);
+    VehicleInputs in = driving(1600u);
+    BcmOutputs out;
+    bcm_step(&ctx, &in, NOW, &out);                    /* 잠금 */
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);
+
+    JitterResult r = run_jitter(&ctx, &in, 1u, 1499u, 30u);
+    ASSERT_EQ(0, r.transitions);
+    ASSERT_EQ(0, r.lock_cmds);
+
+    in.ign.gear = GEAR_P;                              /* 0.01 km/h에서 P여도 아직 (완전히 멈춰야) */
+    in.speed.centi_kmh = 1u;
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);
+
+    in.speed.centi_kmh = 0u;                           /* 0 + P → 해제 */
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_EQ(BCM_STATE_IDLE, out.state);
+    ASSERT_EQ(BCM_RULE_T7, out.rule);
+}
+
+static void test_hysteresis_warning_jitter(void) {
+    /* 문이 열린 채 2 ↔ 4 km/h를 오간다 (주차장에서 문 열고 천천히): 경고음이 깜빡이면 안 된다 */
+    BcmContext ctx;
+    bcm_init(&ctx);
+    VehicleInputs in = driving(1600u);
+    BcmOutputs out;
+    bcm_step(&ctx, &in, NOW, &out);                    /* 먼저 잠금 주행 */
+    in.doors.fl = true;
+
+    JitterResult r = run_jitter(&ctx, &in, 200u, 400u, 30u);
+    ASSERT_EQ(1, r.transitions);                       /* 첫 4 km/h에서 WARNING으로 한 번 */
+    ASSERT_EQ(0, r.buzzer_off_while_warning);          /* 2 km/h로 떨어져도 경고음 유지 */
+    ASSERT_EQ(BCM_STATE_WARNING, ctx.state);
+
+    in.speed.centi_kmh = 0u;                           /* 완전히 멈추면 그때 끝 (T11) */
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_EQ(BCM_RULE_T11, out.rule);
+    ASSERT_FALSE(out.warning_buzzer);
+}
+
 int main(void) {
     printf("[test_bcm]\n");
     RUN_TEST(test_state_values_match_0x400);
@@ -347,5 +432,8 @@ int main(void) {
     RUN_TEST(test_priority);
     RUN_TEST(test_unknown_state_resets);
     RUN_TEST(test_lock_cmd_only_once);
+    RUN_TEST(test_hysteresis_lock_jitter);
+    RUN_TEST(test_hysteresis_unlock_only_when_parked);
+    RUN_TEST(test_hysteresis_warning_jitter);
     return TEST_SUMMARY();
 }
