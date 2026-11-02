@@ -1,6 +1,6 @@
 /* 시나리오 로그 생성기 (M3-4)
  *
- *   make scenarios   → data/scenarios 폴더의 .log 파일 5개를 다시 만든다
+ *   make scenarios   → data/scenarios 폴더의 .log 파일 6개를 다시 만든다
  *
  * 100ms마다(정의서의 송신 주기) 0x300 → 0x200 → 0x100 프레임을 하나씩 찍는다.
  * 신호 값은 can_set_bits()(M2-2)로 정의서 위치에 넣는다 → 손으로 16진수를 계산하지 않아도 된다.
@@ -148,6 +148,28 @@ static void scenario_speed_jitter(uint32_t i, Tick *s) {
     else               { s->speed = 0u; }
 }
 
+/* ---------- 06 도어 신호 노이즈 (M4-5 디바운싱) ---------- */
+/* 40 km/h 주행 중 도어 신호가 한두 프레임씩 튄다 (가짜) → 무시. 5.0~5.9초에만 진짜로 열림 */
+static void scenario_door_noise(uint32_t i, Tick *s) {
+    s->ign = (i < 5u || i >= 100u) ? 0u : 2u;
+    s->gear = (i >= 10u && i < 95u) ? 3u : 0u;
+    s->send_speed = true;
+    if (i < 10u)       { s->speed = 0u; }
+    else if (i < 20u)  { s->speed = ramp(0u, KMH(40u), i - 10u, 10u); }    /* 1.0~2.0초 가속 */
+    else if (i < 70u)  { s->speed = KMH(40u); }                           /* 2.0~7.0초 정속 */
+    else if (i < 90u)  { s->speed = ramp(KMH(40u), 0u, i - 70u, 20u); }    /* 7.0~9.0초 감속 */
+    else               { s->speed = 0u; }
+
+    s->doors = 0u;
+    if (i == 30u)               { s->doors = 0x01u; }     /* 3.0초: FL 1프레임 튐 */
+    if (i == 35u || i == 36u)   { s->doors = 0x01u; }     /* 3.5~3.6초: FL 2프레임 튐 */
+    if (i == 40u)               { s->doors = 0x10u; }     /* 4.0초: 트렁크 1프레임 튐 */
+    if (i == 44u)               { s->doors = 0x01u; }     /* 4.4초: FL */
+    if (i == 45u)               { s->doors = 0x08u; }     /* 4.5초: RR (다른 문이 번갈아 튐) */
+    if (i == 46u)               { s->doors = 0x01u; }     /* 4.6초: FL */
+    if (i >= 50u && i < 60u)    { s->doors = 0x01u; }     /* 5.0~5.9초: FL 진짜로 열림 */
+}
+
 static void inject_invalid_lines(FILE *out, uint32_t i, uint32_t t_ms) {
     switch (i) {
         case 15u: emit_raw_line(out, t_ms + 10u, "555#AABBCCDD"); break;               /* 관심 없는 ID */
@@ -196,5 +218,6 @@ int main(int argc, char *argv[]) {
     err |= write_scenario(dir, "03_signal_timeout.log",          scenario_signal_timeout,  85u,  false);
     err |= write_scenario(dir, "04_invalid_frames.log",          scenario_invalid_frames,  42u,  true);
     err |= write_scenario(dir, "05_speed_jitter.log",            scenario_speed_jitter,    85u,  false);
+    err |= write_scenario(dir, "06_door_noise.log",              scenario_door_noise,      105u, false);
     return err == 0 ? 0 : 1;
 }
