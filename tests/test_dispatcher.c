@@ -30,8 +30,15 @@ static void test_dispatch_speed(void) {
     ASSERT_TRUE(in.speed.valid);
     ASSERT_EQ(10000, in.speed.centi_kmh);
     ASSERT_EQ(1000, in.speed_rx_ms);
+    ASSERT_EQ(1, in.speed_rx_count);                    /* 차속 프레임 1개 (M4-6) */
     ASSERT_FALSE(in.doors_received);                    /* 다른 상태는 그대로 */
     ASSERT_FALSE(in.ign_received);
+    ASSERT_EQ(0, in.ign_rx_count);
+
+    CanFrame invalid = frame(MSG_ID_VEHICLE_SPEED, 8, 0xFF, 0xFF);   /* 무효값 0xFFFF */
+    ASSERT_EQ(DISPATCH_OK, can_dispatch(&invalid, &in, 1100, NULL));
+    ASSERT_EQ(2, in.speed_rx_count);                    /* 무효값도 "프레임은 받았다"로 센다 */
+    ASSERT_FALSE(in.speed.valid);
 }
 
 static void test_dispatch_door(void) {
@@ -65,6 +72,7 @@ static void test_dispatch_ign(void) {
     ASSERT_EQ(IGN_ON, in.ign.ign);
     ASSERT_EQ(GEAR_D, in.ign.gear);
     ASSERT_EQ(3000, in.ign_rx_ms);
+    ASSERT_EQ(1, in.ign_rx_count);
 }
 
 /* ---------- 관심 없는 메시지 → 무시 ---------- */

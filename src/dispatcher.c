@@ -35,6 +35,7 @@ static DispatchResult route(const CanFrame *f, VehicleInputs *in, uint32_t now_m
             in->speed = s;
             in->speed_received = true;
             in->speed_rx_ms = now_ms;
+            in->speed_rx_count++;
             return DISPATCH_OK;
         }
         case MSG_ID_DOOR_STATUS: {
@@ -56,6 +57,7 @@ static DispatchResult route(const CanFrame *f, VehicleInputs *in, uint32_t now_m
             in->ign = g;
             in->ign_received = true;
             in->ign_rx_ms = now_ms;
+            in->ign_rx_count++;
             return DISPATCH_OK;
         }
         default:

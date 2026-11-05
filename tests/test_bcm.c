@@ -25,6 +25,8 @@ static VehicleInputs driving(uint16_t centi) {
     in.speed_rx_ms = NOW;
     in.doors_rx_ms = NOW;
     in.doors_rx_count = 1u;          /* 도어 프레임 1개를 받은 상태 (디바운싱의 첫 샘플 = 바로 인정) */
+    in.speed_rx_count = 1u;          /* 차속, 시동도 프레임 1개씩 (M4-6) */
+    in.ign_rx_count = 1u;
     return in;
 }
 
@@ -523,6 +525,183 @@ static void test_debounce_doors_independent(void) {
     }
 }
 
+/* ---------- 신호 끊김과 복귀 (M4-6) ---------- */
+
+/* t_ms 한 칸(100ms): 실제 시나리오처럼 0x300 → 0x200 → 0x100 순서로 프레임이 오고, 프레임마다 판단한다.
+ * send_speed = false면 차속(0x100)만 안 온다. 마지막 판단 결과를 out에 남긴다 */
+static void tick_step(BcmContext *ctx, VehicleInputs *in, uint32_t t_ms, bool send_speed, BcmOutputs *out) {
+    in->ign_rx_ms = t_ms;                      /* 0x300 */
+    in->ign_rx_count++;
+    bcm_step(ctx, in, t_ms, out);
+    in->doors_rx_ms = t_ms;                    /* 0x200 */
+    in->doors_rx_count++;
+    bcm_step(ctx, in, t_ms, out);
+    if (send_speed) {                          /* 0x100 */
+        in->speed_rx_ms = t_ms;
+        in->speed_rx_count++;
+        bcm_step(ctx, in, t_ms, out);
+    }
+}
+
+/* NOW에 잠금 주행 → 100ms마다 차속 없이 6번(600ms) → 끊김 감지까지 만들어 두기 */
+static void start_speed_lost(BcmContext *ctx, VehicleInputs *in, uint32_t *t, BcmOutputs *out) {
+    bcm_init(ctx);
+    *in = driving(4000u);
+    bcm_step(ctx, in, NOW, out);                       /* T3 잠금 */
+    *t = NOW;
+    for (int i = 0; i < 6; i++) {
+        *t += 100u;
+        tick_step(ctx, in, *t, false, out);
+    }
+}
+
+static void test_signal_lost_reported(void) {
+    BcmContext ctx;
+    VehicleInputs in;
+    BcmOutputs out;
+    uint32_t t = NOW;
+    bcm_init(&ctx);
+    in = driving(4000u);
+    bcm_step(&ctx, &in, t, &out);
+    ASSERT_EQ(0, out.lost_signals);
+
+    for (int i = 0; i < 5; i++) {                      /* 500ms까지는 아직 정상 */
+        t += 100u;
+        tick_step(&ctx, &in, t, false, &out);
+        ASSERT_EQ(0, out.newly_lost);
+    }
+    t += 100u;                                         /* 600ms → 이 시각의 첫 프레임(0x300) 판단에서 끊김 */
+    in.ign_rx_ms = t;
+    in.ign_rx_count++;
+    bcm_step(&ctx, &in, t, &out);
+    ASSERT_EQ(BCM_SIG_SPEED, out.newly_lost);          /* "차속"이 새로 끊김 */
+    ASSERT_EQ(BCM_SIG_SPEED, out.lost_signals);
+    ASSERT_EQ(BCM_RULE_T5, out.rule);
+    in.doors_rx_ms = t;                                /* 같은 시각 0x200 판단: 이미 알렸으니 "새로"는 아님 */
+    in.doors_rx_count++;
+    bcm_step(&ctx, &in, t, &out);
+    ASSERT_EQ(0, out.newly_lost);
+    ASSERT_EQ(BCM_SIG_SPEED, out.lost_signals);
+
+    t += 100u;                                         /* 계속 끊겨 있으면 "새로" 끊긴 건 아님 */
+    tick_step(&ctx, &in, t, false, &out);
+    ASSERT_EQ(0, out.newly_lost);
+    ASSERT_EQ(BCM_SIG_SPEED, out.lost_signals);
+}
+
+static void test_signal_not_received_is_not_lost(void) {
+    /* 시동 직후 아직 한 번도 안 온 신호는 "끊김"으로 알리지 않는다 (T2로 대기만) */
+    BcmContext ctx;
+    bcm_init(&ctx);
+    VehicleInputs in;
+    vehicle_inputs_init(&in);
+    BcmOutputs out;
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_EQ(0, out.lost_signals);
+    ASSERT_EQ(BCM_RULE_T2, out.rule);
+
+    /* 그다음 첫 프레임들이 오면: "끊김"으로 알리지 않고, 기다리지 않고 바로 믿는다 */
+    in = driving(1600u);
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_EQ(0, out.newly_lost);                      /* 시동 걸 때마다 "신호 끊김" 경고가 나면 안 됨 */
+    ASSERT_EQ(0, out.lost_signals);
+    ASSERT_EQ(0, out.recovered);                       /* 끊긴 적이 없으니 "복귀"도 아님 */
+    ASSERT_EQ(BCM_RULE_T3, out.rule);                  /* 첫 프레임으로 바로 판단 (3개 안 기다림) */
+}
+
+static void test_signal_recovery_needs_three_frames(void) {
+    BcmContext ctx;
+    VehicleInputs in;
+    BcmOutputs out;
+    uint32_t t;
+    start_speed_lost(&ctx, &in, &t, &out);
+    ASSERT_EQ(BCM_STATE_WARNING, out.state);
+
+    t += 100u; tick_step(&ctx, &in, t, true, &out);
+    ASSERT_EQ(BCM_STATE_WARNING, out.state);           /* 1번째 정상 프레임: 아직 */
+    t += 100u; tick_step(&ctx, &in, t, true, &out);
+    ASSERT_EQ(BCM_STATE_WARNING, out.state);           /* 2번째: 아직 */
+    ASSERT_EQ(0, out.recovered);
+    t += 100u; tick_step(&ctx, &in, t, true, &out);
+    ASSERT_EQ(BCM_SIG_SPEED, out.recovered);           /* 3번째: 복귀 */
+    ASSERT_EQ(0, out.lost_signals);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);
+    ASSERT_EQ(BCM_RULE_T9, out.rule);
+}
+
+static void test_signal_recovery_counts_frames_not_steps(void) {
+    /* 정상 차속 프레임은 1개인데 판단이 여러 번 → 1번으로 센다 */
+    BcmContext ctx;
+    VehicleInputs in;
+    BcmOutputs out;
+    uint32_t t;
+    start_speed_lost(&ctx, &in, &t, &out);
+
+    t += 100u;
+    tick_step(&ctx, &in, t, true, &out);               /* 차속 프레임 1개 */
+    for (int i = 0; i < 5; i++) {
+        bcm_step(&ctx, &in, t, &out);                  /* 같은 프레임으로 판단 5번 더 */
+    }
+    ASSERT_EQ(BCM_STATE_WARNING, out.state);
+}
+
+static void test_signal_recovery_reset_by_invalid(void) {
+    /* 정상 2개 → 무효값 1개 → 처음부터 다시 3개 */
+    BcmContext ctx;
+    VehicleInputs in;
+    BcmOutputs out;
+    uint32_t t;
+    start_speed_lost(&ctx, &in, &t, &out);
+
+    t += 100u; tick_step(&ctx, &in, t, true, &out);
+    t += 100u; tick_step(&ctx, &in, t, true, &out);
+    in.speed.valid = false;                            /* 0xFFFF */
+    t += 100u; tick_step(&ctx, &in, t, true, &out);
+    in.speed.valid = true;
+    t += 100u; tick_step(&ctx, &in, t, true, &out);
+    t += 100u; tick_step(&ctx, &in, t, true, &out);
+    ASSERT_EQ(BCM_STATE_WARNING, out.state);           /* 무효 뒤로 2개뿐 → 아직 */
+    t += 100u; tick_step(&ctx, &in, t, true, &out);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);    /* 3개 → 복귀 */
+}
+
+static void test_signal_recovery_reset_by_timeout(void) {
+    /* 정상 2개 → 다시 600ms 끊김 → 처음부터 다시 */
+    BcmContext ctx;
+    VehicleInputs in;
+    BcmOutputs out;
+    uint32_t t;
+    start_speed_lost(&ctx, &in, &t, &out);
+
+    t += 100u; tick_step(&ctx, &in, t, true, &out);
+    t += 100u; tick_step(&ctx, &in, t, true, &out);
+    for (int i = 0; i < 6; i++) {
+        t += 100u; tick_step(&ctx, &in, t, false, &out);
+    }
+    t += 100u; tick_step(&ctx, &in, t, true, &out);
+    ASSERT_EQ(BCM_STATE_WARNING, out.state);           /* 끊긴 뒤 1개 → 아직 (앞의 2개는 버려짐) */
+    t += 100u; tick_step(&ctx, &in, t, true, &out);
+    t += 100u; tick_step(&ctx, &in, t, true, &out);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);
+}
+
+static void test_signal_flapping_stays_warning(void) {
+    /* 접촉 불량: 차속이 600ms마다 한 번씩만 온다 (시나리오 07) → 경고가 켜졌다 꺼졌다 하면 안 된다 */
+    BcmContext ctx;
+    VehicleInputs in;
+    BcmOutputs out;
+    uint32_t t;
+    start_speed_lost(&ctx, &in, &t, &out);
+    uint32_t transitions = 0u;
+    for (int i = 0; i < 30; i++) {
+        t += 100u;
+        tick_step(&ctx, &in, t, (i % 6) == 5, &out);   /* 차속은 600ms마다 한 번 */
+        if (out.state_changed) { transitions++; }
+        ASSERT_TRUE(out.warning_buzzer);               /* 3초 동안 경고음 유지 */
+    }
+    ASSERT_EQ(0, transitions);
+}
+
 int main(void) {
     printf("[test_bcm]\n");
     RUN_TEST(test_state_values_match_0x400);
@@ -552,5 +731,12 @@ int main(void) {
     RUN_TEST(test_debounce_third_frame_accepted);
     RUN_TEST(test_debounce_counts_frames_not_steps);
     RUN_TEST(test_debounce_doors_independent);
+    RUN_TEST(test_signal_lost_reported);
+    RUN_TEST(test_signal_not_received_is_not_lost);
+    RUN_TEST(test_signal_recovery_needs_three_frames);
+    RUN_TEST(test_signal_recovery_counts_frames_not_steps);
+    RUN_TEST(test_signal_recovery_reset_by_invalid);
+    RUN_TEST(test_signal_recovery_reset_by_timeout);
+    RUN_TEST(test_signal_flapping_stays_warning);
     return TEST_SUMMARY();
 }

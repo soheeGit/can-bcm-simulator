@@ -81,8 +81,35 @@ static void log_dispatch(const CanFrame *f, DispatchResult r,
     }
 }
 
-/* BCM 판단 결과를 로그로: 상태가 바뀌었을 때와 잠금 명령을 냈을 때만 (INFO) */
-static void log_bcm(const BcmOutputs *out) {
+/* 끊긴 신호가 왜 못 믿게 됐는지 한 줄로 (M4-6) */
+static void log_signal_lost(BcmSignal sig, const VehicleInputs *in) {
+    uint32_t rx_ms = 0u;
+    switch (sig) {
+        case BCM_SIG_IGN:   rx_ms = in->ign_rx_ms; break;
+        case BCM_SIG_SPEED:
+            if (!in->speed.valid) {
+                LOG_WARN("신호 이상: %s 무효값 (0xFFFF)", bcm_signal_name(sig));
+                return;
+            }
+            rx_ms = in->speed_rx_ms;
+            break;
+        case BCM_SIG_DOORS: rx_ms = in->doors_rx_ms; break;
+        default: break;
+    }
+    LOG_WARN("신호 끊김: %s (마지막 수신 %u.%03us)", bcm_signal_name(sig), rx_ms / 1000u, rx_ms % 1000u);
+}
+
+/* BCM 판단 결과를 로그로: 신호 끊김/복귀(M4-6), 상태가 바뀌었을 때, 잠금 명령을 냈을 때 */
+static void log_bcm(const BcmOutputs *out, const VehicleInputs *in) {
+    static const BcmSignal signals[] = { BCM_SIG_IGN, BCM_SIG_SPEED, BCM_SIG_DOORS };
+    for (size_t i = 0; i < sizeof(signals) / sizeof(signals[0]); i++) {
+        if ((out->newly_lost & (uint8_t)signals[i]) != 0u) {
+            log_signal_lost(signals[i], in);
+        }
+        if ((out->recovered & (uint8_t)signals[i]) != 0u) {
+            LOG_INFO("신호 복귀: %s (정상 프레임 %u개 연속)", bcm_signal_name(signals[i]), BCM_SIGNAL_RECOVERY_COUNT);
+        }
+    }
     if (out->state_changed) {
         LOG_INFO("STATE %s -> %s (%s: %s)", bcm_state_name(out->prev_state), bcm_state_name(out->state),
                  bcm_rule_name(out->rule), bcm_rule_reason(out->rule));
@@ -150,7 +177,7 @@ int log_read_stream(FILE *in, VehicleInputs *inputs, BcmContext *bcm, LogReadSta
         if (bcm != NULL) {
             BcmOutputs out;
             bcm_step(bcm, inputs, t_ms, &out);
-            log_bcm(&out);
+            log_bcm(&out, inputs);
             if (out.state_changed) {
                 stats->bcm_transitions++;
             }

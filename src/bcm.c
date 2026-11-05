@@ -28,14 +28,21 @@ static bool signal_lost(bool received, uint32_t rx_ms, uint32_t now_ms) {
 }
 
 /* 문의 열림/닫힘은 VehicleInputs의 값(raw) 대신 디바운싱된 값으로 본다 (M4-5) */
-static BcmConditions evaluate(const VehicleInputs *in, const DoorStatus *doors, uint32_t now_ms) {
+/* 신호를 믿을 수 있나 = 한 번이라도 받았고, "못 믿음"에 걸려 있지 않음 (M4-6) */
+static bool health_known(const BcmSignalHealth *h, bool received) {
+    return received && !h->latched;
+}
+
+/* 문의 열림/닫힘은 VehicleInputs의 값(raw) 대신 디바운싱된 값으로 본다 (M4-5)
+ * 신호를 믿을 수 있는지는 update_health()가 미리 정해 둔 ctx의 건강 상태로 본다 (M4-6) */
+static BcmConditions evaluate(const BcmContext *ctx, const VehicleInputs *in, const DoorStatus *doors) {
     BcmConditions c;
 
-    c.ign_known   = !signal_lost(in->ign_received, in->ign_rx_ms, now_ms);
+    c.ign_known   = health_known(&ctx->ign_health, in->ign_received);
     c.ign_run     = c.ign_known && (in->ign.ign == IGN_ON || in->ign.ign == IGN_START);
     c.ign_stop    = c.ign_known && (in->ign.ign == IGN_OFF || in->ign.ign == IGN_ACC);
-    c.speed_known = !signal_lost(in->speed_received, in->speed_rx_ms, now_ms) && in->speed.valid;
-    c.doors_known = !signal_lost(in->doors_received, in->doors_rx_ms, now_ms);
+    c.speed_known = health_known(&ctx->speed_health, in->speed_received);
+    c.doors_known = health_known(&ctx->doors_health, in->doors_received);
     c.inputs_ok   = c.ign_known && c.speed_known && c.doors_known;
     c.door_open   = c.doors_known && door_any_open(doors);
     c.all_closed  = c.doors_known && !door_any_open(doors);
@@ -44,7 +51,60 @@ static BcmConditions evaluate(const VehicleInputs *in, const DoorStatus *doors, 
     return c;
 }
 
-/* ---------- 2) 도어 디바운싱 (M4-5) ---------- */
+/* ---------- 2) 신호 끊김과 복귀 (M4-6) ---------- */
+
+/* 신호 하나의 건강 상태를 갱신한다.
+ * - 믿고 있던 신호가 끊기거나(timeout) 무효값이면 → 바로 "못 믿음"에 건다 (Fail-safe는 빠르게)
+ * - 걸려 있는 신호는 정상 프레임이 BCM_SIGNAL_RECOVERY_COUNT개 연속으로 와야 풀린다 (복귀는 신중하게)
+ * value_valid: 지금 값이 정상인가 (차속 0xFFFF면 false. 시동, 도어는 항상 true) */
+static void health_update(BcmSignalHealth *h, bool received, uint32_t rx_count, uint32_t rx_ms,
+                          bool value_valid, uint32_t now_ms) {
+    if (!received) {
+        return;                                   /* 아직 한 번도 안 옴: "모름"이지만 끊긴 건 아니다 */
+    }
+    const bool new_frame = (rx_count != h->seen_count);
+    h->seen_count = rx_count;
+    const bool timed_out = signal_lost(received, rx_ms, now_ms);
+
+    if (!h->latched) {
+        if (timed_out || !value_valid) {
+            h->latched = true;                    /* 끊김 / 무효 → 바로 못 믿음 */
+            h->good_count = 0u;
+        }
+        return;
+    }
+
+    if(timed_out) {
+        h->good_count = 0u;
+    } else if(new_frame) {
+        if(value_valid) {
+            if(h->good_count < BCM_SIGNAL_RECOVERY_COUNT) {
+                h->good_count++;
+            }
+        } else {
+            h->good_count = 0u;
+        }
+    }
+    if(h->good_count >= BCM_SIGNAL_RECOVERY_COUNT) {
+        h->latched = false;
+    }
+}
+
+/* 신호 3개의 건강 상태를 갱신하고, 지금 못 믿는 신호를 비트로 돌려준다 (한 번도 못 받은 신호는 빼고) */
+static uint8_t update_health(BcmContext *ctx, const VehicleInputs *in, uint32_t now_ms) {
+    health_update(&ctx->ign_health, in->ign_received, in->ign_rx_count, in->ign_rx_ms, true, now_ms);
+    health_update(&ctx->speed_health, in->speed_received, in->speed_rx_count, in->speed_rx_ms,
+                  in->speed.valid, now_ms);
+    health_update(&ctx->doors_health, in->doors_received, in->doors_rx_count, in->doors_rx_ms, true, now_ms);
+
+    uint8_t mask = 0u;
+    if (in->ign_received && ctx->ign_health.latched)     { mask |= (uint8_t)BCM_SIG_IGN; }
+    if (in->speed_received && ctx->speed_health.latched) { mask |= (uint8_t)BCM_SIG_SPEED; }
+    if (in->doors_received && ctx->doors_health.latched) { mask |= (uint8_t)BCM_SIG_DOORS; }
+    return mask;
+}
+
+/* ---------- 3) 도어 디바운싱 (M4-5) ---------- */
 
 /* 새 샘플(도어 프레임 하나의 값) raw가 왔을 때 한 번 부른다.
  * 같은 값이 BCM_DOOR_DEBOUNCE_COUNT번 연속으로 와야 stable을 바꾼다 */
@@ -105,7 +165,7 @@ static DoorStatus debounced_doors(const BcmContext *ctx) {
     return d;
 }
 
-/* ---------- 3) 상태 바꾸기: 진입 동작을 한 곳에 모은다 ---------- */
+/* ---------- 4) 상태 바꾸기: 진입 동작을 한 곳에 모은다 ---------- */
 
 /* 상태를 바꿀 때는 반드시 이 함수를 거친다.
  * "IDLE로 가면 locked를 지운다" 같은 규칙을 여기 한 곳에만 쓰면,
@@ -120,7 +180,7 @@ static void transition_to(BcmContext *ctx, BcmState next, BcmRule rule) {
     ctx->state = next;
 }
 
-/* ---------- 4) 판단 한 번 ---------- */
+/* ---------- 5) 판단 한 번 ---------- */
 
 void bcm_init(BcmContext *ctx) {
     if (ctx == NULL) {
@@ -136,9 +196,10 @@ void bcm_step(BcmContext *ctx, const VehicleInputs *in, uint32_t now_ms, BcmOutp
         return;
     }
 
+    const uint8_t lost = update_health(ctx, in, now_ms);   /* 신호 끊김 / 복귀 (M4-6) */
     update_doors(ctx, in);                  /* 새 도어 프레임이면 디바운싱 (M4-5) */
     const DoorStatus doors = debounced_doors(ctx);
-    const BcmConditions c = evaluate(in, &doors, now_ms);
+    const BcmConditions c = evaluate(ctx, in, &doors);
     const BcmState prev = ctx->state;
     BcmState next = prev;                   /* 맞는 줄이 없으면 그대로 */
     BcmRule rule = BCM_RULE_NONE;
@@ -209,6 +270,10 @@ void bcm_step(BcmContext *ctx, const VehicleInputs *in, uint32_t now_ms, BcmOutp
     out->rule           = rule;
     out->warning_buzzer = (ctx->state == BCM_STATE_WARNING);   /* Moore: 상태만 본다 */
     out->door_lock_cmd  = (rule == BCM_RULE_T3);               /* Mealy: 이번 전이만 본다 */
+    out->lost_signals   = lost;
+    out->newly_lost     = (uint8_t)(lost & (uint8_t)~ctx->lost_mask);   /* 지난번엔 믿었는데 지금 못 믿음 */
+    out->recovered      = (uint8_t)(ctx->lost_mask & (uint8_t)~lost);   /* 지난번엔 못 믿었는데 지금 믿음 */
+    ctx->lost_mask      = lost;
 }
 
 /* ---------- 이름 ---------- */
@@ -252,10 +317,19 @@ const char *bcm_rule_reason(BcmRule rule) {
         case BCM_RULE_T6:    return "문 열림, 3km/h 초과";
         case BCM_RULE_T7:    return "정차, P단";
         case BCM_RULE_T8:    return "신호 이상 계속";
-        case BCM_RULE_T9:    return "문 닫힘, 잠금 상태로 복귀";
-        case BCM_RULE_T10:   return "문 닫힘";
+        case BCM_RULE_T9:    return "경고 원인 해소 (신호 정상, 문 닫힘), 잠금 상태로";
+        case BCM_RULE_T10:   return "경고 원인 해소 (신호 정상, 문 닫힘)";
         case BCM_RULE_T11:   return "정차";
         case BCM_RULE_RESET: return "알 수 없는 상태, 안전 상태로";
         default:             return "?";
+    }
+}
+
+const char *bcm_signal_name(BcmSignal sig) {
+    switch (sig) {
+        case BCM_SIG_IGN:   return "시동";
+        case BCM_SIG_SPEED: return "차속";
+        case BCM_SIG_DOORS: return "도어";
+        default:            return "?";
     }
 }

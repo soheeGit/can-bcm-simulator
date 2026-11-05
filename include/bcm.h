@@ -48,6 +48,10 @@
  * 노이즈로 한두 프레임 튄 값은 무시된다. 100ms 주기라 N = 3이면 최대 200ms 늦게 반응한다 */
 #define BCM_DOOR_DEBOUNCE_COUNT  3u
 
+/* 신호 복귀 (M4-6): 한 번 끊기거나 무효였던 신호는, 정상 프레임이 N개 연속으로 와야 다시 믿는다.
+ * 접촉 불량처럼 신호가 들락날락할 때 경고 ↔ 복귀가 반복되지 않게 (복귀 쪽 히스테리시스) */
+#define BCM_SIGNAL_RECOVERY_COUNT  3u
+
 /* ---------- 상태 ---------- */
 
 /* 값은 0x400 BCM_STATUS의 BcmState 신호와 같다 (signal-spec.md). 바꾸지 말 것 */
@@ -74,6 +78,20 @@ typedef enum {
     BCM_RULE_RESET       /* 표에 없음: ctx->state가 알 수 없는 값 → 안전 상태(IDLE)로 복귀 (default:) */
 } BcmRule;
 
+/* 판단에 쓰는 신호 3개. 비트로 묶어서 "어떤 신호가 끊겼나"를 한 숫자에 담는다 (BcmOutputs) */
+typedef enum {
+    BCM_SIG_IGN   = 1u << 0,   /* 0x300 시동/기어 */
+    BCM_SIG_SPEED = 1u << 1,   /* 0x100 차속 */
+    BCM_SIG_DOORS = 1u << 2    /* 0x200 도어 */
+} BcmSignal;
+
+/* 신호 하나의 건강 상태 (M4-6) */
+typedef struct {
+    bool     latched;      /* true = "못 믿음"에 걸려 있음 (끊김 또는 무효값 이후 아직 복귀 전) */
+    uint8_t  good_count;   /* 걸려 있는 동안 정상 프레임이 연속으로 몇 개 왔나 */
+    uint32_t seen_count;   /* 마지막으로 처리한 *_rx_count (새 프레임 알아보기) */
+} BcmSignalHealth;
+
 /* 디바운싱된 신호 하나 (1비트 신호용: 문 하나) */
 typedef struct {
     bool    stable;      /* 인정된 값. BCM은 이 값으로 판단한다 */
@@ -90,6 +108,10 @@ typedef struct {
     BcmDebounced door_fl, door_fr, door_rl, door_rr, door_trunk;
     bool     doors_seeded;        /* 첫 도어 프레임을 받았나 (첫 값은 기다리지 않고 바로 인정) */
     uint32_t doors_seen_count;    /* 마지막으로 처리한 VehicleInputs.doors_rx_count */
+
+    /* 신호 건강 (M4-6) */
+    BcmSignalHealth ign_health, speed_health, doors_health;
+    uint8_t  lost_mask;           /* 지난 판단에서 못 믿던 신호들 (BcmSignal 비트) */
     /* M4-8(Alive Counter)에서 필드가 추가된다 */
 } BcmContext;
 
@@ -101,6 +123,11 @@ typedef struct {
     bool     state_changed;    /* 이번 판단에서 상태가 바뀌었나 (로그용) */
     BcmState prev_state;       /* 판단 전의 상태 (로그용: "IDLE -> DRIVING_LOCKED") */
     BcmRule  rule;             /* 실행된 규칙. 없으면 BCM_RULE_NONE */
+
+    /* 신호 이상 (M4-6, 로그용). BcmSignal 비트의 조합. 한 번도 못 받은 신호는 넣지 않는다 */
+    uint8_t  lost_signals;     /* 지금 못 믿는 신호 */
+    uint8_t  newly_lost;       /* 이번 판단에서 새로 못 믿게 된 신호 */
+    uint8_t  recovered;        /* 이번 판단에서 다시 믿게 된 신호 */
 } BcmOutputs;
 
 /* ---------- 함수 ---------- */
@@ -122,5 +149,8 @@ const char *bcm_rule_name(BcmRule rule);
 
 /* 규칙이 실행된 이유 (로그용): 예) T3 → "시동 ON, 15km/h 이상, 문 닫힘" */
 const char *bcm_rule_reason(BcmRule rule);
+
+/* 신호 이름 (로그용): BCM_SIG_SPEED → "차속" */
+const char *bcm_signal_name(BcmSignal sig);
 
 #endif
