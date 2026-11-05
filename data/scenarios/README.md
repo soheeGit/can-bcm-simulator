@@ -1,6 +1,7 @@
 # 시나리오 로그 (M3-4)
 
 BCM 상태 머신(M4)을 검증하기 위한 주행 시나리오. **TDD의 인수 테스트**처럼, 여기 적은 "기대 결과"를 M4가 만족해야 한다.
+`make test`의 `tests/test_scenarios.c`가 7개 파일을 전부 돌려서 상태 전이의 시각과 규칙을 자동으로 확인한다 (M4-7).
 
 - 형식: `docs/log-format.md` (candump `-l`). **주석 없음** (M3-1 결정)
 - 생성: `make scenarios` (`tools/gen_scenarios.c`가 `can_set_bits()`로 만든다. 손으로 고치지 말고 생성기를 고칠 것)

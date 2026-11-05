@@ -19,6 +19,17 @@
 /* 한 줄을 담을 버퍼 크기. 정상 줄은 최대 60자 정도라 넉넉하게 */
 #define LOG_LINE_MAX 128u
 
+/* 상태 전이를 앞에서부터 몇 개까지 기록할지 (시나리오 통합 테스트용, M4-7). 넘치면 횟수만 센다 */
+#define LOG_MAX_TRANSITIONS 16u
+
+/* 상태 전이 한 번의 기록: "몇 초에, 어디서 어디로, 어떤 규칙으로" */
+typedef struct {
+    uint32_t t_ms;
+    BcmState from;
+    BcmState to;
+    BcmRule  rule;
+} BcmTransitionRecord;
+
 typedef struct {
     uint32_t lines;          /* 읽은 줄 수 (빈 줄, 주석 포함) */
     uint32_t frames;         /* 파싱에 성공한 프레임 수 */
@@ -27,6 +38,7 @@ typedef struct {
     DispatchStats dispatch;  /* 파싱된 프레임의 디스패처 결과 (ok / ignored / error) */
     uint32_t bcm_transitions;  /* BCM 상태가 바뀐 횟수 (bcm이 NULL이면 0) */
     uint32_t bcm_lock_cmds;    /* 도어 잠금 명령 횟수 */
+    BcmTransitionRecord transitions[LOG_MAX_TRANSITIONS];   /* 앞에서부터 최대 LOG_MAX_TRANSITIONS개 */
 } LogReadStats;
 
 /* 이미 열린 스트림에서 끝까지 읽는다 (테스트에서는 메모리 문자열을 스트림으로 넘길 수 있다)

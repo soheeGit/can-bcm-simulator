@@ -179,6 +179,13 @@ int log_read_stream(FILE *in, VehicleInputs *inputs, BcmContext *bcm, LogReadSta
             bcm_step(bcm, inputs, t_ms, &out);
             log_bcm(&out, inputs);
             if (out.state_changed) {
+                if (stats->bcm_transitions < LOG_MAX_TRANSITIONS) {
+                    BcmTransitionRecord *rec = &stats->transitions[stats->bcm_transitions];
+                    rec->t_ms = t_ms;
+                    rec->from = out.prev_state;
+                    rec->to = out.state;
+                    rec->rule = out.rule;
+                }
                 stats->bcm_transitions++;
             }
             if (out.door_lock_cmd) {

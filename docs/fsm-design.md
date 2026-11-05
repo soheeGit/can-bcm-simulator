@@ -2,6 +2,7 @@
 
 > M4의 기준 문서. 코드(`src/bcm.c`, M4-3)와 테스트(M4-7)는 **이 문서의 표를 그대로** 옮긴다.
 > 문서와 코드가 다르면 코드가 틀린 것이다. 규칙을 바꿀 때는 이 문서를 먼저 고친다.
+> 자동 검증 (M4-7): 4번 전이 표 → `tests/test_bcm_table.c` (한 줄 = 테스트 한 줄), 9번 시나리오 대입 → `tests/test_scenarios.c` (시각, 규칙까지 비교)
 > 입력 신호의 정의는 [signal-spec.md](signal-spec.md), 검증 시나리오는 [data/scenarios/README.md](../data/scenarios/README.md).
 
 ## 1. BCM이 하는 일
@@ -202,3 +203,4 @@ stateDiagram-v2
 | M4-4 | 해제 문턱 상수 `BCM_STOPPED_SPEED_CENTI` 추가, 히스테리시스 검증 (테스트 + 시나리오 05). 잠금 명령 "진입 시 1회" 확정 |
 | M4-5 | 도어 디바운싱 (3프레임 연속). 02의 기대 결과 4.2 / 5.2초로 수정, 시나리오 06 추가 |
 | M4-6 | 신호별 "못 믿음" 기억과 복귀 조건(정상 3프레임 연속), 끊김/복귀 로그, T9/T10 이유 문구 수정. 03은 4.2초, 04는 2.1초 복귀, 시나리오 07 추가 |
+| M4-7 | 4번 표를 `tests/test_bcm_table.c`의 배열로, 9번 표를 `tests/test_scenarios.c`로 자동 검증. 표에 모든 규칙(T1~T11, RESET)이 있는지 검사 |
