@@ -46,9 +46,9 @@ make clean
 [   1.800s] INFO  도어 잠금 명령
 ...
 [   4.000s] INFO  도어  FL=1 FR=0 RL=0 RR=0 TRUNK=0
-[   4.000s] INFO  STATE DRIVING_LOCKED -> WARNING (T6: 문 열림, 3km/h 초과)
+[   4.200s] INFO  STATE DRIVING_LOCKED -> WARNING (T6: 문 열림, 3km/h 초과)
 [   5.000s] INFO  도어  FL=0 FR=0 RL=0 RR=0 TRUNK=0
-[   5.000s] INFO  STATE WARNING -> DRIVING_LOCKED (T9: 문 닫힘, 잠금 상태로 복귀)
+[   5.200s] INFO  STATE WARNING -> DRIVING_LOCKED (T9: 문 닫힘, 잠금 상태로 복귀)
 ...
 [   9.500s] INFO  STATE DRIVING_LOCKED -> IDLE (T7: 정차, P단)
 ...

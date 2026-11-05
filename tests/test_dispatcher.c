@@ -44,7 +44,15 @@ static void test_dispatch_door(void) {
     ASSERT_TRUE(in.doors.fl);
     ASSERT_TRUE(in.doors.trunk);
     ASSERT_EQ(2000, in.doors_rx_ms);
+    ASSERT_EQ(1, in.doors_rx_count);                    /* 도어 프레임 1개 받음 (M4-5) */
     ASSERT_FALSE(in.speed_received);
+
+    can_dispatch(&f, &in, 2100, NULL);
+    ASSERT_EQ(2, in.doors_rx_count);                    /* 같은 값이어도 새 프레임이면 센다 */
+
+    CanFrame bad = frame(MSG_ID_DOOR_STATUS, 0, 0x00, 0x00);   /* DLC 0: 해석 실패 */
+    ASSERT_EQ(DISPATCH_ERROR, can_dispatch(&bad, &in, 2200, NULL));
+    ASSERT_EQ(2, in.doors_rx_count);                    /* 실패한 프레임은 안 센다 */
 }
 
 static void test_dispatch_ign(void) {

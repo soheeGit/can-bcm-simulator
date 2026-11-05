@@ -27,7 +27,8 @@ static bool signal_lost(bool received, uint32_t rx_ms, uint32_t now_ms) {
     return elapsed > BCM_SIGNAL_TIMEOUT_MS;
 }
 
-static BcmConditions evaluate(const VehicleInputs *in, uint32_t now_ms) {
+/* 문의 열림/닫힘은 VehicleInputs의 값(raw) 대신 디바운싱된 값으로 본다 (M4-5) */
+static BcmConditions evaluate(const VehicleInputs *in, const DoorStatus *doors, uint32_t now_ms) {
     BcmConditions c;
 
     c.ign_known   = !signal_lost(in->ign_received, in->ign_rx_ms, now_ms);
@@ -36,14 +37,75 @@ static BcmConditions evaluate(const VehicleInputs *in, uint32_t now_ms) {
     c.speed_known = !signal_lost(in->speed_received, in->speed_rx_ms, now_ms) && in->speed.valid;
     c.doors_known = !signal_lost(in->doors_received, in->doors_rx_ms, now_ms);
     c.inputs_ok   = c.ign_known && c.speed_known && c.doors_known;
-    c.door_open   = c.doors_known && door_any_open(&in->doors);
-    c.all_closed  = c.doors_known && !door_any_open(&in->doors);
+    c.door_open   = c.doors_known && door_any_open(doors);
+    c.all_closed  = c.doors_known && !door_any_open(doors);
     c.speed       = in->speed.centi_kmh;
     c.gear        = in->ign.gear;
     return c;
 }
 
-/* ---------- 2) 상태 바꾸기: 진입 동작을 한 곳에 모은다 ---------- */
+/* ---------- 2) 도어 디바운싱 (M4-5) ---------- */
+
+/* 새 샘플(도어 프레임 하나의 값) raw가 왔을 때 한 번 부른다.
+ * 같은 값이 BCM_DOOR_DEBOUNCE_COUNT번 연속으로 와야 stable을 바꾼다 */
+static void debounce_update(BcmDebounced *d, bool raw) {
+    if(raw == d->candidate) {
+        if(d->count < BCM_DOOR_DEBOUNCE_COUNT) {
+            d->count++;
+        }
+    } else {
+        d->candidate = raw;
+        d->count = 1u;
+    }
+    if(d->count >= BCM_DOOR_DEBOUNCE_COUNT) {
+        d->stable = d->candidate;
+    }
+}
+
+/* 첫 샘플: 기다리지 않고 바로 인정 (시동 직후 200ms 동안 "문 모름"이 되지 않게) */
+static void debounce_seed(BcmDebounced *d, bool raw) {
+    d->stable = raw;
+    d->candidate = raw;
+    d->count = BCM_DOOR_DEBOUNCE_COUNT;
+}
+
+/* 새 도어 프레임이 왔으면(doors_rx_count가 늘었으면) 문 5개를 각각 디바운싱한다.
+ * 다른 프레임(0x100, 0x300) 때문에 불린 판단에서는 아무것도 안 한다 → "판단 횟수"가 아니라 "도어 프레임 수"를 센다 */
+static void update_doors(BcmContext *ctx, const VehicleInputs *in) {
+    if (!in->doors_received || in->doors_rx_count == ctx->doors_seen_count) {
+        return;
+    }
+    ctx->doors_seen_count = in->doors_rx_count;
+
+    const DoorStatus *raw = &in->doors;
+    if (!ctx->doors_seeded) {
+        debounce_seed(&ctx->door_fl, raw->fl);
+        debounce_seed(&ctx->door_fr, raw->fr);
+        debounce_seed(&ctx->door_rl, raw->rl);
+        debounce_seed(&ctx->door_rr, raw->rr);
+        debounce_seed(&ctx->door_trunk, raw->trunk);
+        ctx->doors_seeded = true;
+        return;
+    }
+    debounce_update(&ctx->door_fl, raw->fl);
+    debounce_update(&ctx->door_fr, raw->fr);
+    debounce_update(&ctx->door_rl, raw->rl);
+    debounce_update(&ctx->door_rr, raw->rr);
+    debounce_update(&ctx->door_trunk, raw->trunk);
+}
+
+/* 디바운싱된 문 상태 (판단에 쓰는 값) */
+static DoorStatus debounced_doors(const BcmContext *ctx) {
+    DoorStatus d;
+    d.fl = ctx->door_fl.stable;
+    d.fr = ctx->door_fr.stable;
+    d.rl = ctx->door_rl.stable;
+    d.rr = ctx->door_rr.stable;
+    d.trunk = ctx->door_trunk.stable;
+    return d;
+}
+
+/* ---------- 3) 상태 바꾸기: 진입 동작을 한 곳에 모은다 ---------- */
 
 /* 상태를 바꿀 때는 반드시 이 함수를 거친다.
  * "IDLE로 가면 locked를 지운다" 같은 규칙을 여기 한 곳에만 쓰면,
@@ -58,12 +120,13 @@ static void transition_to(BcmContext *ctx, BcmState next, BcmRule rule) {
     ctx->state = next;
 }
 
-/* ---------- 3) 판단 한 번 ---------- */
+/* ---------- 4) 판단 한 번 ---------- */
 
 void bcm_init(BcmContext *ctx) {
     if (ctx == NULL) {
         return;
     }
+    *ctx = (BcmContext){0};                 /* 디바운싱 기억까지 전부 0 / false */
     ctx->state = BCM_STATE_IDLE;
     ctx->locked = false;
 }
@@ -73,7 +136,9 @@ void bcm_step(BcmContext *ctx, const VehicleInputs *in, uint32_t now_ms, BcmOutp
         return;
     }
 
-    const BcmConditions c = evaluate(in, now_ms);
+    update_doors(ctx, in);                  /* 새 도어 프레임이면 디바운싱 (M4-5) */
+    const DoorStatus doors = debounced_doors(ctx);
+    const BcmConditions c = evaluate(in, &doors, now_ms);
     const BcmState prev = ctx->state;
     BcmState next = prev;                   /* 맞는 줄이 없으면 그대로 */
     BcmRule rule = BCM_RULE_NONE;

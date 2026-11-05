@@ -31,6 +31,10 @@ typedef struct {
     uint32_t speed_rx_ms;
     uint32_t doors_rx_ms;
     uint32_t ign_rx_ms;
+
+    /* 도어 프레임을 정상 수신한 횟수. BCM 디바운싱(M4-5)이 "새 도어 값이 왔다"를 알아보는 데 쓴다
+     * (bcm_step은 모든 프레임마다 불리므로, 판단 횟수가 아니라 도어 프레임 수를 세야 한다) */
+    uint32_t doors_rx_count;
 } VehicleInputs;
 
 /* 처리 결과 */

@@ -44,6 +44,10 @@
 #define BCM_MOVING_SPEED_CENTI   300u   /* 3.00 km/h 초과면 "달리는 중" */
 #define BCM_SIGNAL_TIMEOUT_MS    500u   /* 이보다 오래 못 받으면 신호 끊김 (100ms 주기 × 5) */
 
+/* 디바운싱 (M4-5): 도어 신호는 새 값이 N번 연속(N개의 도어 프레임) 와야 인정한다.
+ * 노이즈로 한두 프레임 튄 값은 무시된다. 100ms 주기라 N = 3이면 최대 200ms 늦게 반응한다 */
+#define BCM_DOOR_DEBOUNCE_COUNT  3u
+
 /* ---------- 상태 ---------- */
 
 /* 값은 0x400 BCM_STATUS의 BcmState 신호와 같다 (signal-spec.md). 바꾸지 말 것 */
@@ -70,11 +74,23 @@ typedef enum {
     BCM_RULE_RESET       /* 표에 없음: ctx->state가 알 수 없는 값 → 안전 상태(IDLE)로 복귀 (default:) */
 } BcmRule;
 
+/* 디바운싱된 신호 하나 (1비트 신호용: 문 하나) */
+typedef struct {
+    bool    stable;      /* 인정된 값. BCM은 이 값으로 판단한다 */
+    bool    candidate;   /* 지금 연속으로 들어오고 있는 값 */
+    uint8_t count;       /* candidate가 몇 번 연속으로 왔나 */
+} BcmDebounced;
+
 /* BCM의 기억. bcm_step이 읽고 고친다. 부르는 쪽은 직접 고치지 말 것 (테스트 제외) */
 typedef struct {
     BcmState state;      /* 지금 상태 */
     bool     locked;     /* 이번 주행에서 잠금 명령을 냈나 (T3에서 켜고, IDLE로 갈 때 끔) */
-    /* M4-5(디바운싱), M4-8(Alive Counter)에서 필드가 추가된다 */
+
+    /* 도어 디바운싱 (M4-5): 문마다 따로 센다 (센서가 서로 다르니까) */
+    BcmDebounced door_fl, door_fr, door_rl, door_rr, door_trunk;
+    bool     doors_seeded;        /* 첫 도어 프레임을 받았나 (첫 값은 기다리지 않고 바로 인정) */
+    uint32_t doors_seen_count;    /* 마지막으로 처리한 VehicleInputs.doors_rx_count */
+    /* M4-8(Alive Counter)에서 필드가 추가된다 */
 } BcmContext;
 
 /* 한 번 판단한 결과. bcm_step이 매번 처음부터 다시 채운다 (이전 값은 남지 않음) */

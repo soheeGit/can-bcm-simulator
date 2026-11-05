@@ -53,12 +53,25 @@
 | `speed_known` | 차속이 끊기지 않았고 `valid` (0xFFFF가 아님) |
 | `doors_known` | 도어 신호가 끊기지 않음 |
 | **`inputs_ok`** | `ign_known && speed_known && doors_known` (판단에 필요한 신호가 전부 믿을 만함) |
-| `door_open` | `doors_known` 이고 문이 하나라도 열림 (트렁크 포함, `door_any_open`) |
-| `all_closed` | `doors_known` 이고 문이 전부 닫힘 |
+| `door_open` | `doors_known` 이고 **디바운싱된** 문이 하나라도 열림 (트렁크 포함, `door_any_open`) |
+| `all_closed` | `doors_known` 이고 **디바운싱된** 문이 전부 닫힘 |
 | `speed` | `speed_known`일 때의 차속 (centi_kmh) |
 
 - **기어는 `inputs_ok`에 넣지 않는다.** 기어는 "정차 후 `IDLE`로 돌아갈지" 판단에만 쓰고, 모르면(`GEAR_INVALID`) **돌아가지 않을 뿐**이다. 모르는 채로 그 자리에 있는 게 안전하다
 - `ACC`는 "시동 꺼짐"으로 본다. 라디오만 켜진 상태라 주행할 수 없다
+
+### 도어 디바운싱 (M4-5)
+
+문 신호는 노이즈로 한두 프레임 튈 수 있어서, `VehicleInputs.doors` 값을 바로 쓰지 않고 **디바운싱된 값**으로 판단한다.
+
+| 규칙 | 내용 |
+| --- | --- |
+| 인정 조건 | 같은 값이 **도어 프레임 3개 연속** (`BCM_DOOR_DEBOUNCE_COUNT`) |
+| 세는 단위 | **도어 프레임**(0x200) 수. 판단(`bcm_step`) 횟수가 아니다 → 디스패처가 `doors_rx_count`를 센다 |
+| 문마다 | FL, FR, RL, RR, TRUNK를 **따로** 센다 (센서가 다르니까) |
+| 첫 프레임 | 기다리지 않고 **바로 인정** (시동 직후 200ms 동안 "문 모름"이 되지 않게) |
+| 반응 지연 | 100ms 주기 × (3 - 1) = **최대 200ms** 늦게 반응한다 (안전과 노이즈 무시 사이의 타협) |
+| 신호 끊김 | `doors_known`(타임아웃)은 디바운싱과 상관없이 따로 판단한다 |
 
 ## 4. 상태 전이 표 (State Transition Table)
 
@@ -147,10 +160,11 @@ stateDiagram-v2
 | 시나리오 | 상태 변화 | 해당 규칙 |
 | --- | --- | --- |
 | 01 정상 주행 | 0.0 IDLE → **1.8 DRIVING_LOCKED** (잠금 1회) → **9.5 IDLE** | T3, T7 |
-| 02 주행 중 문 열림 | 1.8 DRIVING_LOCKED → **4.0 WARNING** → **5.0 DRIVING_LOCKED** → 9.5 IDLE | T3, T6, T9, T7 |
+| 02 주행 중 문 열림 | 1.8 DRIVING_LOCKED → **4.2 WARNING** → **5.2 DRIVING_LOCKED** → 9.5 IDLE (디바운싱으로 0.2초씩 늦음) | T3, T6, T9, T7 |
 | 03 차속 끊김 | 1.3 DRIVING_LOCKED → **3.5 WARNING** (2.9 마지막 수신 + 500ms 초과) → **4.0 DRIVING_LOCKED** → 7.5 IDLE | T3, T5, T9, T7 |
 | 04 이상한 프레임 | 0.8 DRIVING_LOCKED → **1.8 WARNING** (차속 0xFFFF) → **1.9 DRIVING_LOCKED** → 2.2 기어 무효는 변화 없음 → 3.8 IDLE (정차 + P) | T3, T5, T9, T7 |
 | 05 속도 흔들림 | **1.9 DRIVING_LOCKED** (처음 15.10, 잠금 1회) → 14.90 ↔ 15.10을 오가도, 감속하며 15를 다시 지나도 변화 없음 → 7.5 IDLE | T3, T7 (히스테리시스) |
+| 06 도어 노이즈 | 1.4 DRIVING_LOCKED → 3.0 / 3.5~3.6 / 4.0 / 4.4~4.6 노이즈는 **무시** → **5.2 WARNING** (5.0부터 진짜 열림) → **6.2 DRIVING_LOCKED** → 9.5 IDLE | T3, T6, T9, T7 (디바운싱) |
 
 - 03: 3.4초에는 경과 시간이 정확히 500ms라 아직 끊김이 아니다 (`> 500`). 3.5초에 0x300이 들어올 때 600ms → 끊김
 - 04: 깨진 줄(파싱 실패, DLC 부족)은 디스패처가 값을 바꾸지 않으므로(M2-6) FSM도 반응하지 않는다
@@ -159,7 +173,6 @@ stateDiagram-v2
 
 | 항목 | 이슈 |
 | --- | --- |
-| 도어 신호 디바운싱 (3회 연속 같은 값일 때만 인정) → 02의 WARNING 진입이 4.2초로 늦어짐 | M4-5 |
 | 상태 전이 로그 형식 `STATE IDLE -> DRIVING_LOCKED (T3: speed>=15)` | M4-3 |
 
 ## 변경 이력
@@ -169,3 +182,4 @@ stateDiagram-v2
 | M4-1 | 최초 작성. 초안 표를 검토해 T1~T11로 확정, `locked` 기억 추가 |
 | M4-3 | 구현 후 시나리오 04의 기대 결과 수정 (3.8초 IDLE 누락). 알 수 없는 상태는 `RESET`으로 IDLE 복귀 |
 | M4-4 | 해제 문턱 상수 `BCM_STOPPED_SPEED_CENTI` 추가, 히스테리시스 검증 (테스트 + 시나리오 05). 잠금 명령 "진입 시 1회" 확정 |
+| M4-5 | 도어 디바운싱 (3프레임 연속). 02의 기대 결과 4.2 / 5.2초로 수정, 시나리오 06 추가 |

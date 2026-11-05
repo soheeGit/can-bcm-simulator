@@ -24,11 +24,19 @@ static VehicleInputs driving(uint16_t centi) {
     in.ign_rx_ms = NOW;
     in.speed_rx_ms = NOW;
     in.doors_rx_ms = NOW;
+    in.doors_rx_count = 1u;          /* 도어 프레임 1개를 받은 상태 (디바운싱의 첫 샘플 = 바로 인정) */
     return in;
+}
+
+/* 새 도어 프레임이 하나 더 온 것처럼 (디바운싱은 도어 프레임 수를 센다, M4-5) */
+static void new_door_frame(VehicleInputs *in, bool fl_open) {
+    in->doors.fl = fl_open;
+    in->doors_rx_count++;
 }
 
 /* 원하는 상태에서 시작해서 판단 한 번 (given: ctx, when: bcm_step) */
 static BcmOutputs step_from(BcmContext *ctx, BcmState state, bool locked, const VehicleInputs *in) {
+    bcm_init(ctx);                   /* 디바운싱 기억까지 깨끗하게 (M4-5) */
     ctx->state = state;
     ctx->locked = locked;
     BcmOutputs out;
@@ -340,6 +348,7 @@ static JitterResult run_jitter(BcmContext *ctx, VehicleInputs *in, uint16_t low,
     bool entered_warning = false;
     for (uint32_t i = 0u; i < count; i++) {
         in->speed.centi_kmh = (i % 2u == 0u) ? low : high;     /* low, high, low, high, ... */
+        in->doors_rx_count++;                                   /* 매번 새 프레임이 온 것처럼 */
         BcmOutputs out;
         bcm_step(ctx, in, NOW, &out);
         if (out.door_lock_cmd) { r.lock_cmds++; }
@@ -411,6 +420,109 @@ static void test_hysteresis_warning_jitter(void) {
     ASSERT_FALSE(out.warning_buzzer);
 }
 
+/* ---------- 디바운싱 (M4-5) ---------- */
+
+/* 잠금 주행(40 km/h, 문 닫힘)까지 만들어 두기 */
+static void start_locked_driving(BcmContext *ctx, VehicleInputs *in) {
+    bcm_init(ctx);
+    *in = driving(4000u);
+    BcmOutputs out;
+    bcm_step(ctx, in, NOW, &out);                      /* 첫 샘플(닫힘) 바로 인정 + T3 잠금 */
+    ctx->state = BCM_STATE_DRIVING_LOCKED;
+}
+
+static void test_debounce_first_sample_immediate(void) {
+    /* 첫 도어 프레임은 기다리지 않는다: 문 열고 출발하면 바로 T4 */
+    BcmContext ctx;
+    bcm_init(&ctx);
+    VehicleInputs in = driving(1600u);
+    in.doors.fl = true;
+    BcmOutputs out;
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_EQ(BCM_RULE_T4, out.rule);
+}
+
+static void test_debounce_noise_ignored(void) {
+    BcmContext ctx;
+    VehicleInputs in;
+    BcmOutputs out;
+    start_locked_driving(&ctx, &in);
+
+    new_door_frame(&in, true);                         /* 노이즈 1번 */
+    bcm_step(&ctx, &in, NOW, &out);
+    new_door_frame(&in, false);
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);    /* 무시 */
+
+    new_door_frame(&in, true);                         /* 노이즈 2번 연속 */
+    bcm_step(&ctx, &in, NOW, &out);
+    new_door_frame(&in, true);
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);    /* 아직 무시 (2 < 3) */
+    new_door_frame(&in, false);
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);
+}
+
+static void test_debounce_third_frame_accepted(void) {
+    BcmContext ctx;
+    VehicleInputs in;
+    BcmOutputs out;
+    start_locked_driving(&ctx, &in);
+
+    new_door_frame(&in, true);
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);    /* 1번째 */
+    new_door_frame(&in, true);
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);    /* 2번째 */
+    new_door_frame(&in, true);
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_EQ(BCM_STATE_WARNING, out.state);           /* 3번째에 인정 → T6 */
+    ASSERT_EQ(BCM_RULE_T6, out.rule);
+
+    /* 닫힐 때도 3번 연속이어야 */
+    new_door_frame(&in, false);
+    bcm_step(&ctx, &in, NOW, &out);
+    new_door_frame(&in, false);
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_EQ(BCM_STATE_WARNING, out.state);           /* 2번째까지는 경고 유지 */
+    new_door_frame(&in, false);
+    bcm_step(&ctx, &in, NOW, &out);
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);    /* 3번째에 T9 */
+    ASSERT_EQ(BCM_RULE_T9, out.rule);
+}
+
+static void test_debounce_counts_frames_not_steps(void) {
+    /* 도어 프레임 하나에 판단이 여러 번(0x100, 0x300 때문에) 있어도 1번으로 센다 */
+    BcmContext ctx;
+    VehicleInputs in;
+    BcmOutputs out;
+    start_locked_driving(&ctx, &in);
+
+    new_door_frame(&in, true);                         /* 열림 프레임은 딱 1개 */
+    for (int i = 0; i < 10; i++) {
+        bcm_step(&ctx, &in, NOW, &out);                /* 판단은 10번 */
+    }
+    ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);    /* 그래도 1번으로 쳐서 무시 */
+}
+
+static void test_debounce_doors_independent(void) {
+    /* 문마다 따로 센다: FL과 RR이 번갈아 한 번씩 튀면 둘 다 3번이 안 됨 */
+    BcmContext ctx;
+    VehicleInputs in;
+    BcmOutputs out;
+    start_locked_driving(&ctx, &in);
+
+    for (int i = 0; i < 6; i++) {
+        in.doors.fl = (i % 2 == 0);
+        in.doors.rr = (i % 2 == 1);
+        in.doors_rx_count++;
+        bcm_step(&ctx, &in, NOW, &out);
+        ASSERT_EQ(BCM_STATE_DRIVING_LOCKED, out.state);
+    }
+}
+
 int main(void) {
     printf("[test_bcm]\n");
     RUN_TEST(test_state_values_match_0x400);
@@ -435,5 +547,10 @@ int main(void) {
     RUN_TEST(test_hysteresis_lock_jitter);
     RUN_TEST(test_hysteresis_unlock_only_when_parked);
     RUN_TEST(test_hysteresis_warning_jitter);
+    RUN_TEST(test_debounce_first_sample_immediate);
+    RUN_TEST(test_debounce_noise_ignored);
+    RUN_TEST(test_debounce_third_frame_accepted);
+    RUN_TEST(test_debounce_counts_frames_not_steps);
+    RUN_TEST(test_debounce_doors_independent);
     return TEST_SUMMARY();
 }

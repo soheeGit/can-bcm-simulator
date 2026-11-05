@@ -45,6 +45,7 @@ static DispatchResult route(const CanFrame *f, VehicleInputs *in, uint32_t now_m
             in->doors = d;
             in->doors_received = true;
             in->doors_rx_ms = now_ms;
+            in->doors_rx_count++;
             return DISPATCH_OK;
         }
         case MSG_ID_IGN_STATUS: {
