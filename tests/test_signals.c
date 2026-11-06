@@ -288,6 +288,72 @@ static void test_ign_format(void) {
     ASSERT_STR_EQ("IGN=ON GEAR=D", buf);
 }
 
+/* ---------- 0x400 BCM_STATUS (M4-8) ---------- */
+
+static void test_encode_bcm_status_spec_example(void) {
+    /* signal-spec.md 예시 5: 400#0101000000000005 (주행 잠금, 잠금 명령, AliveCounter 5) */
+    BcmStatusMsg m = { 1u, true, false, 5u };
+    CanFrame f;
+    encode_bcm_status(&m, &f);
+    ASSERT_EQ(MSG_ID_BCM_STATUS, f.id);
+    ASSERT_EQ(8, f.dlc);
+    const uint8_t expected[8] = { 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05 };
+    for (int i = 0; i < 8; i++) {
+        ASSERT_EQ(expected[i], f.data[i]);
+    }
+}
+
+static void test_encode_bcm_status_bits(void) {
+    CanFrame f;
+    BcmStatusMsg m = { 2u, false, true, 15u };      /* WARNING, 경고음, AliveCounter 15 */
+    encode_bcm_status(&m, &f);
+    ASSERT_EQ(0x02, f.data[0]);                       /* bit 0~1 = 2 */
+    ASSERT_EQ(0x02, f.data[1]);                       /* bit 9 = 경고음 → data[1]의 1번 비트 */
+    ASSERT_EQ(0x0F, f.data[7]);                       /* bit 56~59 = 15 */
+    for (int i = 2; i <= 6; i++) {
+        ASSERT_EQ(0x00, f.data[i]);                   /* 예약은 0 */
+    }
+
+    m.alive_counter = 16u;                            /* 4비트를 넘으면 잘린다 (16 = 1 0000 → 0000) */
+    encode_bcm_status(&m, &f);
+    ASSERT_EQ(0x00, f.data[7]);
+}
+
+static void test_bcm_status_round_trip(void) {
+    /* 모든 조합: state 4 × 잠금 2 × 경고음 2 × AliveCounter 16 = 256가지 */
+    int mismatches = 0;
+    for (uint8_t st = 0u; st < 4u; st++) {
+        for (int lock = 0; lock < 2; lock++) {
+            for (int buz = 0; buz < 2; buz++) {
+                for (uint8_t alive = 0u; alive <= BCM_STATUS_ALIVE_MAX; alive++) {
+                    BcmStatusMsg in = { st, lock != 0, buz != 0, alive };
+                    BcmStatusMsg out = { 0u, false, false, 0u };
+                    CanFrame f;
+                    encode_bcm_status(&in, &f);
+                    if (!decode_bcm_status(&f, &out) || out.state != in.state || out.door_lock_cmd != in.door_lock_cmd ||
+                        out.warning_buzzer != in.warning_buzzer || out.alive_counter != in.alive_counter) {
+                        mismatches++;
+                    }
+                }
+            }
+        }
+    }
+    ASSERT_EQ(0, mismatches);
+}
+
+static void test_decode_bcm_status_rejects(void) {
+    BcmStatusMsg m;
+    CanFrame f = { MSG_ID_BCM_STATUS, 8u, { 0x01, 0x01, 0, 0, 0, 0, 0, 0x05 } };
+    ASSERT_TRUE(decode_bcm_status(&f, &m));
+    f.id = MSG_ID_VEHICLE_SPEED;                      /* 다른 ID */
+    ASSERT_FALSE(decode_bcm_status(&f, &m));
+    f.id = MSG_ID_BCM_STATUS;
+    f.dlc = 7u;                                       /* AliveCounter가 있는 data[7]이 없음 */
+    ASSERT_FALSE(decode_bcm_status(&f, &m));
+    ASSERT_FALSE(decode_bcm_status(NULL, &m));
+    encode_bcm_status(NULL, &f);                      /* 죽지 않기 */
+}
+
 int main(void) {
     printf("[test_signals]\n");
     RUN_TEST(test_speed_zero);
@@ -318,5 +384,9 @@ int main(void) {
     RUN_TEST(test_ign_cannot_decode);
     RUN_TEST(test_enum_names);
     RUN_TEST(test_ign_format);
+    RUN_TEST(test_encode_bcm_status_spec_example);
+    RUN_TEST(test_encode_bcm_status_bits);
+    RUN_TEST(test_bcm_status_round_trip);
+    RUN_TEST(test_decode_bcm_status_rejects);
     return TEST_SUMMARY();
 }

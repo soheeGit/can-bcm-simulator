@@ -119,4 +119,32 @@ const char *gear_name(Gear g);
 /* "IGN=ON GEAR=D" 형태의 문자열로 만든다 (로그용) */
 void ign_status_format(const IgnStatus *s, char *buf, size_t size);
 
+/* ---------- 0x400 BCM_STATUS (BCM이 송신, M4-8) ---------- */
+
+#define BCM_STATUS_DLC              8u
+#define BCM_STATUS_STATE_START_BIT  0u     /* BcmState: 0 = IDLE, 1 = DRIVING_LOCKED, 2 = WARNING */
+#define BCM_STATUS_STATE_LENGTH     2u
+#define BCM_STATUS_LOCK_BIT         8u     /* DoorLockCmd: 1 = 도어 잠금 명령 */
+#define BCM_STATUS_BUZZER_BIT       9u     /* WarningBuzzer: 1 = 경고음 ON */
+#define BCM_STATUS_FLAG_LENGTH      1u
+#define BCM_STATUS_ALIVE_START_BIT  56u    /* AliveCounter: 0 ~ 15, 보낼 때마다 +1 */
+#define BCM_STATUS_ALIVE_LENGTH     4u
+#define BCM_STATUS_ALIVE_MAX        15u
+
+/* 0x400에 실리는 값 (raw). BcmState는 bcm.h에 있지만, 신호 모듈은 BCM을 몰라도 되게 숫자로 둔다 */
+typedef struct {
+    uint8_t state;          /* 0 ~ 3 (3은 예약) */
+    bool    door_lock_cmd;
+    bool    warning_buzzer;
+    uint8_t alive_counter;  /* 0 ~ 15 */
+} BcmStatusMsg;
+
+/* BcmStatusMsg → 0x400 프레임 (DLC 8, 예약 비트는 0). 범위를 넘는 값은 비트 길이만큼 잘린다
+ * f나 msg가 NULL이면 아무것도 안 한다 */
+void encode_bcm_status(const BcmStatusMsg *msg, CanFrame *f);
+
+/* 0x400 프레임 → BcmStatusMsg (round-trip 확인, M5에서 받는 쪽 흉내).
+ * 반환값: 해석할 수 있으면 true (false: NULL, 유효하지 않은 프레임, ID가 0x400이 아님, DLC < 8) */
+bool decode_bcm_status(const CanFrame *f, BcmStatusMsg *out);
+
 #endif

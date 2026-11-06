@@ -31,6 +31,14 @@ typedef struct {
     uint32_t speed_rx_ms;
     uint32_t doors_rx_ms;
     uint32_t ign_rx_ms;
+
+    /* 메시지별로 정상 수신한 프레임 수. BCM이 "새 프레임이 왔다"를 알아보는 데 쓴다
+     * (bcm_step은 모든 프레임마다 불리므로, 판단 횟수가 아니라 프레임 수를 세야 한다)
+     * - doors_rx_count: 도어 디바운싱 (M4-5)
+     * - speed_rx_count, ign_rx_count, doors_rx_count: 끊긴 신호의 복귀 판단 (M4-6) */
+    uint32_t speed_rx_count;
+    uint32_t doors_rx_count;
+    uint32_t ign_rx_count;
 } VehicleInputs;
 
 /* 처리 결과 */

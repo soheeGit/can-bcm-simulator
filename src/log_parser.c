@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 
 #define TS_MAX_SEC_DIGITS   12u   /* 초 부분 최대 자리 수 (overflow 방지, 실제 candump는 10자리) */
 #define TS_FRAC_DIGITS      6u    /* 마이크로초 = 소수점 아래 6자리 */
@@ -245,4 +246,20 @@ const char *parse_result_name(ParseResult r) {
         case PARSE_ERR_TRAILING:    return "ERR_TRAILING";
         default:                    return "UNKNOWN";
     }
+}
+
+/* ---------- 한 줄 쓰기 (파싱의 반대, M4-8) ---------- */
+
+int format_candump_line(char *buf, size_t size, uint64_t ts_us, const char *iface, const CanFrame *f) {
+    if (buf == NULL || size == 0u || iface == NULL || f == NULL || !can_frame_is_valid(f)) {
+        return -1;
+    }
+    char hex[DATA_MAX_HEX_DIGITS + 1u];
+    for (uint32_t i = 0u; i < f->dlc; i++) {
+        snprintf(&hex[i * 2u], 3u, "%02X", f->data[i]);
+    }
+    hex[f->dlc * 2u] = '\0';
+    return snprintf(buf, size, "(%llu.%06llu) %s %03X#%s\n",
+                    (unsigned long long)(ts_us / 1000000u), (unsigned long long)(ts_us % 1000000u),
+                    iface, (unsigned)f->id, hex);
 }

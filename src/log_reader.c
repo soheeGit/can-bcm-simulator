@@ -81,7 +81,58 @@ static void log_dispatch(const CanFrame *f, DispatchResult r,
     }
 }
 
-int log_read_stream(FILE *in, VehicleInputs *inputs, LogReadStats *stats) {
+/* 끊긴 신호가 왜 못 믿게 됐는지 한 줄로 (M4-6) */
+static void log_signal_lost(BcmSignal sig, const VehicleInputs *in) {
+    uint32_t rx_ms = 0u;
+    switch (sig) {
+        case BCM_SIG_IGN:   rx_ms = in->ign_rx_ms; break;
+        case BCM_SIG_SPEED:
+            if (!in->speed.valid) {
+                LOG_WARN("신호 이상: %s 무효값 (0xFFFF)", bcm_signal_name(sig));
+                return;
+            }
+            rx_ms = in->speed_rx_ms;
+            break;
+        case BCM_SIG_DOORS: rx_ms = in->doors_rx_ms; break;
+        default: break;
+    }
+    LOG_WARN("신호 끊김: %s (마지막 수신 %u.%03us)", bcm_signal_name(sig), rx_ms / 1000u, rx_ms % 1000u);
+}
+
+/* BCM 판단 결과를 로그로: 신호 끊김/복귀(M4-6), 상태가 바뀌었을 때, 잠금 명령을 냈을 때 */
+static void log_bcm(const BcmOutputs *out, const VehicleInputs *in) {
+    static const BcmSignal signals[] = { BCM_SIG_IGN, BCM_SIG_SPEED, BCM_SIG_DOORS };
+    for (size_t i = 0; i < sizeof(signals) / sizeof(signals[0]); i++) {
+        if ((out->newly_lost & (uint8_t)signals[i]) != 0u) {
+            log_signal_lost(signals[i], in);
+        }
+        if ((out->recovered & (uint8_t)signals[i]) != 0u) {
+            LOG_INFO("신호 복귀: %s (정상 프레임 %u개 연속)", bcm_signal_name(signals[i]), BCM_SIGNAL_RECOVERY_COUNT);
+        }
+    }
+    if (out->state_changed) {
+        LOG_INFO("STATE %s -> %s (%s: %s)", bcm_state_name(out->prev_state), bcm_state_name(out->state),
+                 bcm_rule_name(out->rule), bcm_rule_reason(out->rule));
+    }
+    if (out->door_lock_cmd) {
+        LOG_INFO("도어 잠금 명령");
+    }
+}
+
+/* BCM이 보낼 0x400을 로그(DEBUG)와 파일(tx_out)로 (M4-8). 송신 프레임의 interface 이름은 vcan0으로 쓴다 */
+static void emit_tx(const CanFrame *f, uint32_t t_ms, FILE *tx_out) {
+    char frame_str[CAN_FRAME_STR_SIZE];
+    can_frame_format(f, frame_str, sizeof(frame_str));
+    LOG_DEBUG("TX %s", frame_str);
+    if (tx_out != NULL) {
+        char line[CANDUMP_LINE_MAX];
+        if (format_candump_line(line, sizeof(line), (uint64_t)t_ms * 1000u, "vcan0", f) > 0) {
+            fputs(line, tx_out);
+        }
+    }
+}
+
+int log_read_stream(FILE *in, VehicleInputs *inputs, BcmContext *bcm, FILE *tx_out, LogReadStats *stats) {
     if (in == NULL || inputs == NULL || stats == NULL) {
         return -1;
     }
@@ -134,6 +185,33 @@ int log_read_stream(FILE *in, VehicleInputs *inputs, LogReadStats *stats) {
         VehicleInputs before = *inputs;
         DispatchResult dr = can_dispatch(&frame, inputs, t_ms, &stats->dispatch);
         log_dispatch(&frame, dr, &before, inputs);
+
+        /* 5) BCM 판단 (M4-3). 디스패처가 inputs를 고친 "다음"에 부른다 */
+        if (bcm != NULL) {
+            BcmOutputs out;
+            bcm_step(bcm, inputs, t_ms, &out);
+            log_bcm(&out, inputs);
+            if (out.state_changed) {
+                if (stats->bcm_transitions < LOG_MAX_TRANSITIONS) {
+                    BcmTransitionRecord *rec = &stats->transitions[stats->bcm_transitions];
+                    rec->t_ms = t_ms;
+                    rec->from = out.prev_state;
+                    rec->to = out.state;
+                    rec->rule = out.rule;
+                }
+                stats->bcm_transitions++;
+            }
+            if (out.door_lock_cmd) {
+                stats->bcm_lock_cmds++;
+            }
+
+            /* 6) 0x400 송신 (M4-8): 100ms마다 */
+            CanFrame tx;
+            if (bcm_tx_poll(bcm, &out, t_ms, &tx)) {
+                stats->tx_frames++;
+                emit_tx(&tx, t_ms, tx_out);
+            }
+        }
     }
 
     /* fgets가 NULL을 돌려준 이유가 "파일 끝"이 아니라 "읽기 오류"인지 확인 */
@@ -144,7 +222,7 @@ int log_read_stream(FILE *in, VehicleInputs *inputs, LogReadStats *stats) {
     return 0;
 }
 
-int log_read_file(const char *path, VehicleInputs *inputs, LogReadStats *stats) {
+int log_read_file(const char *path, VehicleInputs *inputs, BcmContext *bcm, FILE *tx_out, LogReadStats *stats) {
     int result = -1;
     FILE *in = NULL;
 
@@ -157,7 +235,7 @@ int log_read_file(const char *path, VehicleInputs *inputs, LogReadStats *stats) 
         goto cleanup;
     }
 
-    result = log_read_stream(in, inputs, stats);
+    result = log_read_stream(in, inputs, bcm, tx_out, stats);
 
 cleanup:
     /* C에는 try-finally가 없다 → 어디서 실패하든 여기 한 곳으로 모여서 정리한다 */

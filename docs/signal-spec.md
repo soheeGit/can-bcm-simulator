@@ -100,6 +100,8 @@ data[2~7]: 예약
 | AliveCounter | 56 | 4 | 0 ~ 15, 송신할 때마다 1씩 증가 (15 다음 0) |
 
 - AliveCounter: 수신 측은 값이 계속 바뀌는지 보고 BCM이 살아 있는지 판단한다
+- DoorLockCmd: 명령이 난 뒤 **첫 번째 송신 한 번**에만 1 (M4-8, `docs/fsm-design.md` 6번)
+- 코드: `encode_bcm_status()` / `decode_bcm_status()` (`signals.h`), 상수 `BCM_STATUS_*`
 
 ```
           bit 7  6  5  4  3  2      1             0

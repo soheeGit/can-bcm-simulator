@@ -156,6 +156,45 @@ static void test_result_names(void) {
     ASSERT_TRUE(strcmp("UNKNOWN", parse_result_name((ParseResult)99)) == 0);
 }
 
+/* ---------- 한 줄 쓰기 (M4-8) ---------- */
+
+static void test_format_line(void) {
+    CanFrame f = { 0x400u, 8u, { 0x01, 0x01, 0, 0, 0, 0, 0, 0x05 } };
+    char buf[CANDUMP_LINE_MAX];
+    int n = format_candump_line(buf, sizeof(buf), 1800000u, "vcan0", &f);
+    ASSERT_TRUE(strcmp("(1.800000) vcan0 400#0101000000000005\n", buf) == 0);
+    ASSERT_EQ((int)strlen(buf), n);
+
+    CanFrame empty = { 0x123u, 0u, { 0 } };               /* DLC 0 → '#' 뒤가 비어 있음 */
+    format_candump_line(buf, sizeof(buf), 5u, "can0", &empty);
+    ASSERT_TRUE(strcmp("(0.000005) can0 123#\n", buf) == 0);
+
+    CanFrame bad = { 0x800u, 1u, { 0 } };                 /* ID > 0x7FF → 쓰지 않음 */
+    ASSERT_EQ(-1, format_candump_line(buf, sizeof(buf), 0u, "vcan0", &bad));
+}
+
+static void test_format_parse_round_trip(void) {
+    /* 쓰고 → 다시 읽으면 → 같은 프레임, 같은 시각 */
+    const CanFrame frames[] = {
+        { 0x400u, 8u, { 0x02, 0x02, 0, 0, 0, 0, 0, 0x0F } },
+        { 0x100u, 2u, { 0x40, 0x06 } },
+        { 0x7FFu, 8u, { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF } },
+        { 0x000u, 0u, { 0 } },
+    };
+    const uint64_t times[] = { 0u, 1800000u, 123456789u, 4294967295000000u };
+    for (size_t i = 0; i < sizeof(frames) / sizeof(frames[0]); i++) {
+        char buf[CANDUMP_LINE_MAX];
+        CanFrame back;
+        uint64_t ts = 0u;
+        format_candump_line(buf, sizeof(buf), times[i], "vcan0", &frames[i]);
+        ASSERT_EQ(PARSE_OK, parse_candump_line(buf, &back, &ts));
+        ASSERT_EQ(times[i], ts);
+        ASSERT_EQ(frames[i].id, back.id);
+        ASSERT_EQ(frames[i].dlc, back.dlc);
+        ASSERT_TRUE(memcmp(frames[i].data, back.data, frames[i].dlc) == 0);
+    }
+}
+
 int main(void) {
     printf("[test_log_parser]\n");
     RUN_TEST(test_ok_full_frame);
@@ -171,5 +210,7 @@ int main(void) {
     RUN_TEST(test_error_keeps_output);
     RUN_TEST(test_null);
     RUN_TEST(test_result_names);
+    RUN_TEST(test_format_line);
+    RUN_TEST(test_format_parse_round_trip);
     return TEST_SUMMARY();
 }

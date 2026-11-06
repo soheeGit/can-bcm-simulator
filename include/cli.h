@@ -2,6 +2,7 @@
  *
  *   ./bcm_sim --file data/scenarios/01_normal_drive.log --log-level debug
  *   ./bcm_sim -f data/scenarios/01_normal_drive.log -l debug        (짧은 옵션)
+ *   ./bcm_sim -f data/scenarios/02_door_open_while_driving.log -o result.log   (0x400 송신 기록, M4-8)
  *
  * main()에서 바로 해석하지 않고 따로 뺀 이유: 테스트에서 argv를 만들어 넣어 볼 수 있게
  */
@@ -15,6 +16,7 @@
 typedef struct {
     const char *file;        /* --file: 읽을 로그 파일 (필수) */
     LogLevel    log_level;   /* --log-level: 기본 INFO */
+    const char *out_file;    /* --out: BCM이 보내는 0x400을 candump 형식으로 쓸 파일. 없으면 NULL (M4-8) */
 } CliOptions;
 
 typedef enum {
