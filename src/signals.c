@@ -174,19 +174,6 @@ void encode_bcm_status(const BcmStatusMsg *msg, CanFrame *f) {
         f->data[i] = 0u;                    /* 예약 비트는 0 (정의서 공통 규칙) */
     }
 
-    /* ===== TODO(직접 채우기): 신호 4개를 can_set_bits로 넣기 =====
-     * can_set_bits(f->data, 시작 비트, 길이, 값);   ← M2-2에서 만든 함수, gen_scenarios.c의 emit_tick()이 같은 방식
-     *
-     * | 신호            | 시작 비트                  | 길이                     | 값                    |
-     * | BcmState        | BCM_STATUS_STATE_START_BIT | BCM_STATUS_STATE_LENGTH  | msg->state            |
-     * | DoorLockCmd     | BCM_STATUS_LOCK_BIT        | BCM_STATUS_FLAG_LENGTH   | msg->door_lock_cmd    |
-     * | WarningBuzzer   | BCM_STATUS_BUZZER_BIT      | BCM_STATUS_FLAG_LENGTH   | msg->warning_buzzer   |
-     * | AliveCounter    | BCM_STATUS_ALIVE_START_BIT | BCM_STATUS_ALIVE_LENGTH  | msg->alive_counter    |
-     *
-     * 덤: bool을 넘길 때는 `msg->door_lock_cmd ? 1u : 0u`처럼 숫자로 바꿔서 넘기면 뜻이 분명하다 (값 칸은 uint32_t)
-     * 확인: make test → test_encode_bcm_status_*, test_bcm_status_round_trip, test_tx_round_trip이 통과하면 성공
-     *       정의서 예시 5: 상태 1, 잠금 1, 경고음 0, Alive 5 → 400#0101000000000005
-     */
     can_set_bits(f->data, BCM_STATUS_STATE_START_BIT, BCM_STATUS_STATE_LENGTH, msg->state);
     can_set_bits(f->data, BCM_STATUS_LOCK_BIT, BCM_STATUS_FLAG_LENGTH, msg->door_lock_cmd ? 1u : 0u);
     can_set_bits(f->data, BCM_STATUS_BUZZER_BIT, BCM_STATUS_FLAG_LENGTH, msg->warning_buzzer ? 1u : 0u);
