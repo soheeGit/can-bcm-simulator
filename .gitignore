@@ -12,3 +12,7 @@ playground/link_demo/demo
 
 # macOS
 .DS_Store
+
+# 실험으로 생기는 CAN 로그 (M4-8 --out, M5 candump -l)
+candump-*.log
+result.log
