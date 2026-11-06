@@ -9,7 +9,15 @@ DEPFLAGS := -MMD -MP
 BUILD  := build
 TARGET := $(BUILD)/bcm_sim
 
+# Linux 전용 코드 (SocketCAN, M5): macOS에서는 빌드에서 뺀다
+UNAME_S       := $(shell uname -s)
+LINUX_ONLY    := src/can_socket.c
+LINUX_TESTS   := tests/test_can_socket.c
+
 SRCS := $(wildcard src/*.c)
+ifneq ($(UNAME_S),Linux)
+SRCS := $(filter-out $(LINUX_ONLY),$(SRCS))
+endif
 OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 
 # make debug: AddressSanitizer + UndefinedBehaviorSanitizer 포함 빌드 (build/debug/)
@@ -22,12 +30,18 @@ DEBUG_OBJS   := $(patsubst src/%.c,$(DEBUG_BUILD)/%.o,$(SRCS))
 LIB_OBJS   := $(filter-out $(BUILD)/main.o,$(OBJS))
 TEST_BUILD := $(BUILD)/tests
 TEST_SRCS  := $(wildcard tests/test_*.c)
+ifneq ($(UNAME_S),Linux)
+TEST_SRCS  := $(filter-out $(LINUX_TESTS),$(TEST_SRCS))
+endif
 TEST_BINS  := $(patsubst tests/%.c,$(TEST_BUILD)/%,$(TEST_SRCS))
 
 # make scenarios: tools/gen_scenarios.c로 data/scenarios/*.log를 다시 만든다 (M3-4)
 GEN_SCENARIOS := $(BUILD)/gen_scenarios
 
-.PHONY: all debug test clean scenarios
+# make socket_demo (Linux): 소켓을 열고 fd 번호를 보여 주는 실습 프로그램 (M5-3)
+SOCKET_DEMO := $(BUILD)/can_socket_demo
+
+.PHONY: all debug test clean scenarios socket_demo
 
 all: $(TARGET)
 
@@ -70,8 +84,13 @@ scenarios: $(GEN_SCENARIOS)
 $(GEN_SCENARIOS): tools/gen_scenarios.c $(LIB_OBJS) | $(BUILD)
 	$(CC) $(CFLAGS) $(DEPFLAGS) $(filter %.c %.o,$^) -o $@
 
+socket_demo: $(SOCKET_DEMO)
+
+$(SOCKET_DEMO): tools/can_socket_demo.c $(LIB_OBJS) | $(BUILD)
+	$(CC) $(CFLAGS) $(DEPFLAGS) $(filter %.c %.o,$^) -o $@
+
 clean:
 	rm -rf $(BUILD)
 
 # 컴파일러가 만든 의존성 파일을 읽는다 (처음 빌드할 때는 없으니 - 로 "없어도 괜찮음")
--include $(OBJS:.o=.d) $(DEBUG_OBJS:.o=.d) $(TEST_BINS:=.d) $(GEN_SCENARIOS).d
+-include $(OBJS:.o=.d) $(DEBUG_OBJS:.o=.d) $(TEST_BINS:=.d) $(GEN_SCENARIOS).d $(SOCKET_DEMO).d
