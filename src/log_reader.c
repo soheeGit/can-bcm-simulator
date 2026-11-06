@@ -119,7 +119,20 @@ static void log_bcm(const BcmOutputs *out, const VehicleInputs *in) {
     }
 }
 
-int log_read_stream(FILE *in, VehicleInputs *inputs, BcmContext *bcm, LogReadStats *stats) {
+/* BCM이 보낼 0x400을 로그(DEBUG)와 파일(tx_out)로 (M4-8). 송신 프레임의 interface 이름은 vcan0으로 쓴다 */
+static void emit_tx(const CanFrame *f, uint32_t t_ms, FILE *tx_out) {
+    char frame_str[CAN_FRAME_STR_SIZE];
+    can_frame_format(f, frame_str, sizeof(frame_str));
+    LOG_DEBUG("TX %s", frame_str);
+    if (tx_out != NULL) {
+        char line[CANDUMP_LINE_MAX];
+        if (format_candump_line(line, sizeof(line), (uint64_t)t_ms * 1000u, "vcan0", f) > 0) {
+            fputs(line, tx_out);
+        }
+    }
+}
+
+int log_read_stream(FILE *in, VehicleInputs *inputs, BcmContext *bcm, FILE *tx_out, LogReadStats *stats) {
     if (in == NULL || inputs == NULL || stats == NULL) {
         return -1;
     }
@@ -191,6 +204,13 @@ int log_read_stream(FILE *in, VehicleInputs *inputs, BcmContext *bcm, LogReadSta
             if (out.door_lock_cmd) {
                 stats->bcm_lock_cmds++;
             }
+
+            /* 6) 0x400 송신 (M4-8): 100ms마다 */
+            CanFrame tx;
+            if (bcm_tx_poll(bcm, &out, t_ms, &tx)) {
+                stats->tx_frames++;
+                emit_tx(&tx, t_ms, tx_out);
+            }
         }
     }
 
@@ -202,7 +222,7 @@ int log_read_stream(FILE *in, VehicleInputs *inputs, BcmContext *bcm, LogReadSta
     return 0;
 }
 
-int log_read_file(const char *path, VehicleInputs *inputs, BcmContext *bcm, LogReadStats *stats) {
+int log_read_file(const char *path, VehicleInputs *inputs, BcmContext *bcm, FILE *tx_out, LogReadStats *stats) {
     int result = -1;
     FILE *in = NULL;
 
@@ -215,7 +235,7 @@ int log_read_file(const char *path, VehicleInputs *inputs, BcmContext *bcm, LogR
         goto cleanup;
     }
 
-    result = log_read_stream(in, inputs, bcm, stats);
+    result = log_read_stream(in, inputs, bcm, tx_out, stats);
 
 cleanup:
     /* C에는 try-finally가 없다 → 어디서 실패하든 여기 한 곳으로 모여서 정리한다 */

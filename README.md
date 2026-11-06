@@ -24,6 +24,7 @@ make clean
 | --- | --- | --- |
 | `--file <경로>` | `-f` | 읽을 candump 로그 파일 (필수) |
 | `--log-level <레벨>` | `-l` | `debug` / `info`(기본) / `warn` / `error` / `off` |
+| `--out <경로>` | `-o` | BCM이 100ms마다 보내는 0x400 BCM_STATUS를 candump 형식으로 저장 |
 | `--help` | `-h` | 사용법 |
 | `--version` | `-V` | 버전 |
 
@@ -36,7 +37,7 @@ make clean
 ```
 
 ```
-[   0.000s] INFO  can-bcm-simulator 0.1.0 시작: data/scenarios/02_door_open_while_driving.log (로그 레벨 INFO)
+[   0.000s] INFO  can-bcm-simulator 0.2.0 시작: data/scenarios/02_door_open_while_driving.log (로그 레벨 INFO)
 [   0.000s] INFO  시동  IGN=OFF GEAR=P
 [   0.000s] INFO  도어  FL=0 FR=0 RL=0 RR=0 TRUNK=0
 [   0.000s] INFO  차속  0.00 km/h
@@ -60,7 +61,24 @@ make clean
 BCM
   최종 상태 : IDLE
   상태 전이 : 4회, 도어 잠금 명령 : 1회
+  0x400 송신 : 106프레임
 ```
+
+### 예: BCM 송신 프레임(0x400) 저장
+
+```bash
+./build/bcm_sim -f data/scenarios/02_door_open_while_driving.log -o result.log
+```
+
+```
+(1.800000) vcan0 400#0000000000000002     ← IDLE, Alive Counter 2
+(1.900000) vcan0 400#0101000000000003     ← DRIVING_LOCKED + 도어 잠금 명령
+(2.000000) vcan0 400#0100000000000004
+...
+(4.300000) vcan0 400#020200000000000B     ← WARNING + 경고음
+```
+
+`data[0]` = 상태, `data[1]` = 잠금 명령(bit 0) / 경고음(bit 1), `data[7]` = Alive Counter (0 ~ 15). 정의: [docs/signal-spec.md](docs/signal-spec.md)
 
 ### 예: 잘못된 프레임만 보기
 

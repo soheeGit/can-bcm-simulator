@@ -1,4 +1,6 @@
+#include <errno.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "bcm.h"
 #include "cli.h"
@@ -31,6 +33,7 @@ static void print_summary(const LogReadStats *stats, const VehicleInputs *in, co
     printf("\nBCM\n");
     printf("  최종 상태 : %s\n", bcm_state_name(bcm->state));
     printf("  상태 전이 : %u회, 도어 잠금 명령 : %u회\n", stats->bcm_transitions, stats->bcm_lock_cmds);
+    printf("  0x400 송신 : %u프레임\n", stats->tx_frames);
 }
 
 int main(int argc, char *argv[]) {
@@ -60,9 +63,25 @@ int main(int argc, char *argv[]) {
     vehicle_inputs_init(&in);
     bcm_init(&bcm);                         /* 처음 한 번 (프레임마다 부르면 상태를 잊는다) */
 
-    if (log_read_file(opts.file, &in, &bcm, &stats) != 0) {
+    FILE *tx_out = NULL;                    /* --out (M4-8) */
+    if (opts.out_file != NULL) {
+        tx_out = fopen(opts.out_file, "w");
+        if (tx_out == NULL) {
+            LOG_ERROR("출력 파일을 열 수 없습니다: %s (%s)", opts.out_file, strerror(errno));
+            return EXIT_FAIL;
+        }
+    }
+
+    int result = log_read_file(opts.file, &in, &bcm, tx_out, &stats);
+    if (tx_out != NULL) {
+        fclose(tx_out);
+    }
+    if (result != 0) {
         return EXIT_FAIL;
     }
     print_summary(&stats, &in, &bcm);
+    if (opts.out_file != NULL) {
+        printf("  → %s\n", opts.out_file);
+    }
     return EXIT_OK;
 }

@@ -6,6 +6,7 @@
  * 잘못된 줄은 줄 번호와 이유를 WARN 로그로 찍고 다음 줄로 넘어간다 (멈추지 않는다).
  * 값이 바뀌면 INFO, 모든 프레임은 DEBUG 로그로 찍는다 (logger.h, M3-5).
  * BCM 상태가 바뀌면 "STATE IDLE -> DRIVING_LOCKED (T3: ...)"를 INFO로 찍는다 (M4-3).
+ * BCM이 100ms마다 만드는 0x400 BCM_STATUS를 candump 형식으로 파일에 쓸 수 있다 (M4-8, --out).
  */
 #ifndef LOG_READER_H
 #define LOG_READER_H
@@ -38,18 +39,20 @@ typedef struct {
     DispatchStats dispatch;  /* 파싱된 프레임의 디스패처 결과 (ok / ignored / error) */
     uint32_t bcm_transitions;  /* BCM 상태가 바뀐 횟수 (bcm이 NULL이면 0) */
     uint32_t bcm_lock_cmds;    /* 도어 잠금 명령 횟수 */
+    uint32_t tx_frames;        /* 만든 0x400 프레임 수 (M4-8) */
     BcmTransitionRecord transitions[LOG_MAX_TRANSITIONS];   /* 앞에서부터 최대 LOG_MAX_TRANSITIONS개 */
 } LogReadStats;
 
 /* 이미 열린 스트림에서 끝까지 읽는다 (테스트에서는 메모리 문자열을 스트림으로 넘길 수 있다)
  * - inputs: 프레임을 반영할 차량 상태 (미리 vehicle_inputs_init 해 둘 것)
  * - bcm: 프레임마다 bcm_step을 돌릴 BCM (미리 bcm_init 해 둘 것). NULL이면 BCM 없이 읽기만 한다
+ * - tx_out: BCM이 보내는 0x400을 candump 형식으로 쓸 곳 (M4-8). NULL이면 안 쓴다
  * - stats: 결과 통계 (0으로 초기화해서 채운다)
  * 반환값: 0 = 끝까지 읽음, -1 = 인자가 NULL이거나 읽는 도중 입출력 오류 */
-int log_read_stream(FILE *in, VehicleInputs *inputs, BcmContext *bcm, LogReadStats *stats);
+int log_read_stream(FILE *in, VehicleInputs *inputs, BcmContext *bcm, FILE *tx_out, LogReadStats *stats);
 
 /* 파일을 열어서 log_read_stream()으로 읽고, 반드시 닫는다
  * 반환값: 0 = 성공, -1 = 파일을 열 수 없거나 읽기 오류 (이유를 ERROR 로그로 찍는다) */
-int log_read_file(const char *path, VehicleInputs *inputs, BcmContext *bcm, LogReadStats *stats);
+int log_read_file(const char *path, VehicleInputs *inputs, BcmContext *bcm, FILE *tx_out, LogReadStats *stats);
 
 #endif

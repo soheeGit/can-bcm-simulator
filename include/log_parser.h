@@ -36,4 +36,10 @@ ParseResult parse_candump_line(const char *line, CanFrame *out, uint64_t *ts_us)
 /* 결과 이름 (로그용) */
 const char *parse_result_name(ParseResult r);
 
+/* 파싱의 반대: 프레임 하나를 candump -l 형식 한 줄로 쓴다 (M4-8, BCM 송신 프레임 기록용)
+ *   "(1.800000) vcan0 400#0101000000000005\n"
+ * Standard ID(3자리)만 쓴다. buf가 모자라면 잘리고, 반환값은 snprintf처럼 "필요했던 글자 수" (실패하면 -1) */
+#define CANDUMP_LINE_MAX 64u
+int format_candump_line(char *buf, size_t size, uint64_t ts_us, const char *iface, const CanFrame *f);
+
 #endif

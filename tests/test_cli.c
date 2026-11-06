@@ -70,6 +70,21 @@ static void test_errors(void) {
     ASSERT_EQ(CLI_ERROR, cli_parse(ARGC(positional), positional, &o, NULL));
 }
 
+static void test_out_option(void) {
+    char *a[] = {"bcm_sim", "--file", "a.log", "--out", "tx.log", NULL};
+    char *b[] = {"bcm_sim", "-f", "a.log", "-o", "tx2.log", NULL};
+    char *c[] = {"bcm_sim", "-f", "a.log", NULL};
+    char *d[] = {"bcm_sim", "-f", "a.log", "--out", NULL};       /* 값 없음 */
+    CliOptions o;
+    ASSERT_EQ(CLI_OK, cli_parse(ARGC(a), a, &o, NULL));
+    ASSERT_TRUE(strcmp("tx.log", o.out_file) == 0);
+    ASSERT_EQ(CLI_OK, cli_parse(ARGC(b), b, &o, NULL));
+    ASSERT_TRUE(strcmp("tx2.log", o.out_file) == 0);
+    ASSERT_EQ(CLI_OK, cli_parse(ARGC(c), c, &o, NULL));
+    ASSERT_TRUE(o.out_file == NULL);                              /* 안 주면 NULL */
+    ASSERT_EQ(CLI_ERROR, cli_parse(ARGC(d), d, &o, NULL));
+}
+
 static void test_parse_twice(void) {
     /* getopt 상태를 되돌리지 않으면 두 번째 해석이 틀어진다 (reset_getopt 확인) */
     char *a[] = {"bcm_sim", "--file", "first.log", NULL};
@@ -89,6 +104,7 @@ int main(void) {
     RUN_TEST(test_equals_form);
     RUN_TEST(test_help_and_version);
     RUN_TEST(test_errors);
+    RUN_TEST(test_out_option);
     RUN_TEST(test_parse_twice);
     return TEST_SUMMARY();
 }

@@ -52,6 +52,9 @@
  * 접촉 불량처럼 신호가 들락날락할 때 경고 ↔ 복귀가 반복되지 않게 (복귀 쪽 히스테리시스) */
 #define BCM_SIGNAL_RECOVERY_COUNT  3u
 
+/* 0x400 BCM_STATUS 송신 주기 (M4-8, signal-spec: 모든 메시지 100ms) */
+#define BCM_TX_PERIOD_MS  100u
+
 /* ---------- 상태 ---------- */
 
 /* 값은 0x400 BCM_STATUS의 BcmState 신호와 같다 (signal-spec.md). 바꾸지 말 것 */
@@ -112,7 +115,12 @@ typedef struct {
     /* 신호 건강 (M4-6) */
     BcmSignalHealth ign_health, speed_health, doors_health;
     uint8_t  lost_mask;           /* 지난 판단에서 못 믿던 신호들 (BcmSignal 비트) */
-    /* M4-8(Alive Counter)에서 필드가 추가된다 */
+
+    /* 0x400 송신 (M4-8) */
+    bool     tx_started;          /* 한 번이라도 보냈나 */
+    uint32_t next_tx_ms;          /* 다음에 보낼 시각 (100ms 칸에 맞춤) */
+    bool     lock_cmd_pending;    /* 잠금 명령이 났는데 아직 0x400에 실어 보내지 않음 */
+    uint8_t  alive_counter;       /* 다음 0x400에 실을 Alive Counter (0 ~ 15) */
 } BcmContext;
 
 /* 한 번 판단한 결과. bcm_step이 매번 처음부터 다시 채운다 (이전 값은 남지 않음) */
@@ -142,6 +150,13 @@ void bcm_init(BcmContext *ctx);
  * - out:    결과를 채울 곳
  * 인자 중 하나라도 NULL이면 아무것도 안 한다 */
 void bcm_step(BcmContext *ctx, const VehicleInputs *in, uint32_t now_ms, BcmOutputs *out);
+
+/* 0x400 송신 (M4-8). bcm_step 바로 뒤에 매번 부른다.
+ * - 보낼 때가 됐으면(100ms마다) frame에 0x400을 채우고 true. 아니면 false
+ * - 잠금 명령(out->door_lock_cmd)은 판단 한 번에만 켜지므로, 송신 때가 아니면 기억해 뒀다가 다음 송신에 싣는다
+ * - 보낼 때마다 Alive Counter를 1씩 올린다 (15 다음 0)
+ * 인자 중 하나라도 NULL이면 false */
+bool bcm_tx_poll(BcmContext *ctx, const BcmOutputs *out, uint32_t now_ms, CanFrame *frame);
 
 /* 이름 (로그용): "IDLE", "DRIVING_LOCKED", "WARNING" / "T1" ~ "T11", "RESET", "-" */
 const char *bcm_state_name(BcmState state);

@@ -16,18 +16,20 @@ static void reset_getopt(void) {
 
 void cli_print_usage(FILE *out, const char *prog) {
     fprintf(out,
-            "사용법: %s --file <로그 파일> [--log-level <레벨>]\n"
+            "사용법: %s --file <로그 파일> [--log-level <레벨>] [--out <출력 파일>]\n"
             "\n"
             "옵션:\n"
             "  -f, --file <경로>         읽을 candump 로그 파일 (필수)\n"
             "  -l, --log-level <레벨>    debug | info | warn | error | off (기본: info)\n"
+            "  -o, --out <경로>          BCM이 보내는 0x400 BCM_STATUS를 candump 형식으로 저장\n"
             "  -h, --help                이 도움말\n"
             "  -V, --version             버전\n"
             "\n"
             "예:\n"
             "  %s --file data/scenarios/02_door_open_while_driving.log\n"
-            "  %s -f data/scenarios/04_invalid_frames.log -l warn\n",
-            prog, prog, prog);
+            "  %s -f data/scenarios/04_invalid_frames.log -l warn\n"
+            "  %s -f data/scenarios/02_door_open_while_driving.log -o result.log\n",
+            prog, prog, prog, prog);
 }
 
 CliResult cli_parse(int argc, char *argv[], CliOptions *opts, FILE *err) {
@@ -36,17 +38,19 @@ CliResult cli_parse(int argc, char *argv[], CliOptions *opts, FILE *err) {
     }
     opts->file = NULL;
     opts->log_level = LOG_LEVEL_INFO;
+    opts->out_file = NULL;
 
     /* 긴 옵션 표: { 이름, 값이 필요한가, (안 씀), 짧은 옵션 글자 } */
     static const struct option long_opts[] = {
         { "file",      required_argument, NULL, 'f' },
         { "log-level", required_argument, NULL, 'l' },
+        { "out",       required_argument, NULL, 'o' },
         { "help",      no_argument,       NULL, 'h' },
         { "version",   no_argument,       NULL, 'V' },
         { NULL, 0, NULL, 0 }                              /* 표의 끝 표시 */
     };
-    /* 짧은 옵션: 글자 뒤의 ':'는 "값이 필요하다"는 뜻 (-f 경로, -l 레벨) */
-    static const char short_opts[] = "f:l:hV";
+    /* 짧은 옵션: 글자 뒤의 ':'는 "값이 필요하다"는 뜻 (-f 경로, -l 레벨, -o 경로) */
+    static const char short_opts[] = "f:l:o:hV";
 
     reset_getopt();
     opterr = 0;                  /* getopt가 직접 오류를 찍지 않게 → 우리가 한국어로 찍는다 */
@@ -64,6 +68,9 @@ CliResult cli_parse(int argc, char *argv[], CliOptions *opts, FILE *err) {
                     }
                     return CLI_ERROR;
                 }
+                break;
+            case 'o':
+                opts->out_file = optarg;
                 break;
             case 'h':
                 return CLI_HELP;

@@ -276,6 +276,33 @@ void bcm_step(BcmContext *ctx, const VehicleInputs *in, uint32_t now_ms, BcmOutp
     ctx->lost_mask      = lost;
 }
 
+/* ---------- 6) 0x400 송신 (M4-8) ---------- */
+
+bool bcm_tx_poll(BcmContext *ctx, const BcmOutputs *out, uint32_t now_ms, CanFrame *frame) {
+    if (ctx == NULL || out == NULL || frame == NULL) {
+        return false;
+    }
+    if (out->door_lock_cmd) {
+        ctx->lock_cmd_pending = true;          /* 송신 때가 아니어도 잊지 않게 */
+    }
+    if (ctx->tx_started && now_ms < ctx->next_tx_ms) {
+        return false;                          /* 아직 100ms가 안 됨 */
+    }
+
+    BcmStatusMsg msg;
+    msg.state          = (uint8_t)out->state;
+    msg.door_lock_cmd  = ctx->lock_cmd_pending;
+    msg.warning_buzzer = out->warning_buzzer;
+    msg.alive_counter  = ctx->alive_counter;
+    encode_bcm_status(&msg, frame);
+
+    ctx->lock_cmd_pending = false;             /* 실어 보냈으니 끝 (1회) */
+    ctx->alive_counter = (uint8_t)((ctx->alive_counter + 1u) % (BCM_STATUS_ALIVE_MAX + 1u));   /* 15 다음 0 */
+    ctx->next_tx_ms = (now_ms / BCM_TX_PERIOD_MS + 1u) * BCM_TX_PERIOD_MS;                   /* 다음 100ms 칸 */
+    ctx->tx_started = true;
+    return true;
+}
+
 /* ---------- 이름 ---------- */
 
 const char *bcm_state_name(BcmState state) {
