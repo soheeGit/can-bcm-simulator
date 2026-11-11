@@ -60,3 +60,37 @@ void can_socket_close(int fd) {
         close(fd);
     }
 }
+
+/* ---------- 받기 (M5-4) ---------- */
+
+bool can_frame_from_linux(const struct can_frame *in, CanFrame *out) {
+    if (in == NULL || out == NULL) {
+        return false;
+    }
+    /* can_id의 위쪽 3비트는 ID가 아니라 "표시"(flag)다: EFF(29비트) / RTR / ERR */
+    if ((in->can_id & (CAN_EFF_FLAG | CAN_RTR_FLAG | CAN_ERR_FLAG)) != 0u) {
+        return false;
+    }
+    if (in->len > CAN_FRAME_MAX_DLC) {
+        return false;
+    }
+    out->id = in->can_id & CAN_SFF_MASK;
+    out->dlc = in->len;
+    memset(out->data, 0, CAN_FRAME_MAX_DLC);
+    memcpy(out->data, in->data, in->len);
+    return true;
+}
+
+CanReadResult can_socket_read(int fd, CanFrame *out) {
+    struct can_frame raw;
+    ssize_t n = read(fd, &raw, sizeof(raw));
+    if (n < 0) {
+        perror("read(CAN)");
+        return CAN_READ_ERROR;
+    }
+    if ((size_t)n != sizeof(raw)) {            /* CAN_RAW는 프레임 하나를 통째로 준다. 모자라면 이상한 것 */
+        fprintf(stderr, "read(CAN): %zd바이트 (기대 %zu)\n", n, sizeof(raw));
+        return CAN_READ_ERROR;
+    }
+    return can_frame_from_linux(&raw, out) ? CAN_READ_OK : CAN_READ_SKIP;
+}

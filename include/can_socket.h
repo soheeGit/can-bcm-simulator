@@ -11,6 +11,12 @@
 #ifndef CAN_SOCKET_H
 #define CAN_SOCKET_H
 
+#include <stdbool.h>
+
+#include <linux/can.h>
+
+#include "can_frame.h"
+
 /* ifname(예: "vcan0")에 묶인 CAN_RAW 소켓을 연다.
  * 반환값: 파일 디스크립터(0 이상) / 실패하면 -1 (원인은 perror로 stderr에 찍고, errno에 남는다)
  *   - 이름이 NULL, 비었거나 너무 김(15자 초과) → -1, errno = EINVAL
@@ -20,5 +26,26 @@ int can_socket_open(const char *ifname);
 
 /* 소켓을 닫는다. fd가 음수면 아무것도 안 한다 */
 void can_socket_close(int fd);
+
+/* ---------- 받기 (M5-4) ---------- */
+
+/* Linux의 struct can_frame → 우리 CanFrame.
+ * 우리가 다루는 건 일반(11비트) 데이터 프레임뿐이라, 아래는 false(무시):
+ *   - Extended(29비트) ID 프레임 (CAN_EFF_FLAG)
+ *   - Remote 프레임 (CAN_RTR_FLAG)
+ *   - 에러 프레임 (CAN_ERR_FLAG)
+ *   - 길이가 8을 넘는 것, NULL */
+bool can_frame_from_linux(const struct can_frame *in, CanFrame *out);
+
+/* can_socket_read()의 결과 */
+typedef enum {
+    CAN_READ_OK = 0,     /* 우리 프레임 하나를 받음 → out에 채움 */
+    CAN_READ_SKIP,       /* 받았지만 우리가 안 다루는 종류 (EFF/RTR/ERR) → 무시하고 다음으로 */
+    CAN_READ_ERROR       /* read() 실패 또는 크기가 이상함 (원인은 perror, errno) */
+} CanReadResult;
+
+/* 프레임 하나를 받는다. 올 때까지 기다린다(blocking).
+ * read(fd, &frame, sizeof(struct can_frame))가 정확히 그 크기를 돌려줘야 정상 */
+CanReadResult can_socket_read(int fd, CanFrame *out);
 
 #endif
