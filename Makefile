@@ -6,12 +6,18 @@ CFLAGS := -std=c11 -Wall -Wextra -Wswitch-enum -Werror -g -Iinclude
 # -MMD: .d 파일 생성 (시스템 헤더 제외)  -MP: 헤더를 지워도 make가 에러 나지 않게
 DEPFLAGS := -MMD -MP
 
+# 운영체제마다 빌드 폴더를 따로 둔다 (M5): 맥과 VM이 프로젝트 폴더를 공유하므로,
+# 같은 build/에 맥용 .o와 리눅스용 .o가 섞이면 링크가 깨진다 ("unknown file type")
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Linux)
+BUILD  := build-linux
+else
 BUILD  := build
+endif
 TARGET := $(BUILD)/bcm_sim
 
 # Linux 전용 코드 (SocketCAN, M5): macOS에서는 빌드에서 뺀다
-UNAME_S       := $(shell uname -s)
-LINUX_ONLY    := src/can_socket.c
+LINUX_ONLY    := src/can_socket.c src/can_dump.c
 LINUX_TESTS   := tests/test_can_socket.c
 
 SRCS := $(wildcard src/*.c)
