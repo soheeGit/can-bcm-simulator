@@ -80,6 +80,20 @@ BCM
 
 `data[0]` = 상태, `data[1]` = 잠금 명령(bit 0) / 경고음(bit 1), `data[7]` = Alive Counter (0 ~ 15). 정의: [docs/signal-spec.md](docs/signal-spec.md)
 
+### 예: vcan0에서 실시간으로 받기 (Linux, M5)
+
+SocketCAN은 Linux에만 있어서 VM에서 실행한다 (`./scripts/vm_setup.sh` → `multipass shell can-vm`). Linux에서는 빌드 폴더가 `build-linux/`다.
+
+```bash
+./scripts/setup_vcan.sh                              # vcan0 만들기
+make && ./build-linux/bcm_sim --iface vcan0 --dump   # 받는 대로 해석해서 출력 (Ctrl+C로 종료)
+cansend vcan0 100#1027000000000000                   # (다른 터미널) 보내 보기
+```
+
+```
+[   0.525s] INFO  RX 0x100 [8] 10 27 00 00 00 00 00 00    → 차속 100.00 km/h
+```
+
 ### 예: 잘못된 프레임만 보기
 
 ```bash

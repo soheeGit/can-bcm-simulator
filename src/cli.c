@@ -17,9 +17,12 @@ static void reset_getopt(void) {
 void cli_print_usage(FILE *out, const char *prog) {
     fprintf(out,
             "사용법: %s --file <로그 파일> [--log-level <레벨>] [--out <출력 파일>]\n"
+            "        %s --iface <CAN 장치> --dump [--log-level <레벨>]          (Linux)\n"
             "\n"
             "옵션:\n"
-            "  -f, --file <경로>         읽을 candump 로그 파일 (필수)\n"
+            "  -f, --file <경로>         읽을 candump 로그 파일\n"
+            "  -i, --iface <이름>        CAN 장치에서 실시간으로 받기 (예: vcan0, Linux 전용)\n"
+            "  -d, --dump                받는 프레임을 해석해서 찍기 (--iface와 같이)\n"
             "  -l, --log-level <레벨>    debug | info | warn | error | off (기본: info)\n"
             "  -o, --out <경로>          BCM이 보내는 0x400 BCM_STATUS를 candump 형식으로 저장\n"
             "  -h, --help                이 도움말\n"
@@ -29,7 +32,7 @@ void cli_print_usage(FILE *out, const char *prog) {
             "  %s --file data/scenarios/02_door_open_while_driving.log\n"
             "  %s -f data/scenarios/04_invalid_frames.log -l warn\n"
             "  %s -f data/scenarios/02_door_open_while_driving.log -o result.log\n",
-            prog, prog, prog, prog);
+            prog, prog, prog, prog, prog);
 }
 
 CliResult cli_parse(int argc, char *argv[], CliOptions *opts, FILE *err) {
@@ -39,18 +42,22 @@ CliResult cli_parse(int argc, char *argv[], CliOptions *opts, FILE *err) {
     opts->file = NULL;
     opts->log_level = LOG_LEVEL_INFO;
     opts->out_file = NULL;
+    opts->iface = NULL;
+    opts->dump = false;
 
     /* 긴 옵션 표: { 이름, 값이 필요한가, (안 씀), 짧은 옵션 글자 } */
     static const struct option long_opts[] = {
         { "file",      required_argument, NULL, 'f' },
         { "log-level", required_argument, NULL, 'l' },
         { "out",       required_argument, NULL, 'o' },
+        { "iface",     required_argument, NULL, 'i' },
+        { "dump",      no_argument,       NULL, 'd' },
         { "help",      no_argument,       NULL, 'h' },
         { "version",   no_argument,       NULL, 'V' },
         { NULL, 0, NULL, 0 }                              /* 표의 끝 표시 */
     };
-    /* 짧은 옵션: 글자 뒤의 ':'는 "값이 필요하다"는 뜻 (-f 경로, -l 레벨, -o 경로) */
-    static const char short_opts[] = "f:l:o:hV";
+    /* 짧은 옵션: 글자 뒤의 ':'는 "값이 필요하다"는 뜻 (-f 경로, -l 레벨, -o 경로, -i 장치) */
+    static const char short_opts[] = "f:l:o:i:dhV";
 
     reset_getopt();
     opterr = 0;                  /* getopt가 직접 오류를 찍지 않게 → 우리가 한국어로 찍는다 */
@@ -71,6 +78,12 @@ CliResult cli_parse(int argc, char *argv[], CliOptions *opts, FILE *err) {
                 break;
             case 'o':
                 opts->out_file = optarg;
+                break;
+            case 'i':
+                opts->iface = optarg;
+                break;
+            case 'd':
+                opts->dump = true;
                 break;
             case 'h':
                 return CLI_HELP;
@@ -97,9 +110,28 @@ CliResult cli_parse(int argc, char *argv[], CliOptions *opts, FILE *err) {
         }
         return CLI_ERROR;
     }
-    if (opts->file == NULL) {
+    /* 입력은 파일 또는 CAN 장치, 둘 중 하나 */
+    if (opts->file == NULL && opts->iface == NULL) {
         if (err != NULL) {
-            fprintf(err, "--file이 필요합니다\n");
+            fprintf(err, "--file 또는 --iface가 필요합니다\n");
+        }
+        return CLI_ERROR;
+    }
+    if (opts->file != NULL && opts->iface != NULL) {
+        if (err != NULL) {
+            fprintf(err, "--file과 --iface는 같이 쓸 수 없습니다\n");
+        }
+        return CLI_ERROR;
+    }
+    if (opts->dump && opts->iface == NULL) {
+        if (err != NULL) {
+            fprintf(err, "--dump는 --iface와 같이 씁니다\n");
+        }
+        return CLI_ERROR;
+    }
+    if (opts->iface != NULL && !opts->dump) {
+        if (err != NULL) {
+            fprintf(err, "--iface는 지금(M5-4)은 --dump와 같이만 됩니다\n");
         }
         return CLI_ERROR;
     }

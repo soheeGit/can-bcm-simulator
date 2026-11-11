@@ -4,6 +4,9 @@
 
 #include "bcm.h"
 #include "cli.h"
+#if defined(__linux__)
+#include "can_dump.h"
+#endif
 #include "dispatcher.h"
 #include "log_reader.h"
 #include "logger.h"
@@ -54,6 +57,18 @@ int main(int argc, char *argv[]) {
     }
 
     log_set_level(opts.log_level);
+
+    if (opts.iface != NULL) {               /* 실시간 CAN (M5) */
+#if defined(__linux__)
+        LOG_INFO("can-bcm-simulator %s 시작: %s 덤프 (로그 레벨 %s)",
+                 BCM_SIM_VERSION, opts.iface, log_level_name(opts.log_level));
+        return can_dump_run(opts.iface) == 0 ? EXIT_OK : EXIT_FAIL;
+#else
+        fprintf(stderr, "--iface는 Linux(SocketCAN)에서만 됩니다. VM에서 실행하세요: multipass shell can-vm\n");
+        return EXIT_USAGE;
+#endif
+    }
+
     LOG_INFO("can-bcm-simulator %s 시작: %s (로그 레벨 %s)",
              BCM_SIM_VERSION, opts.file, log_level_name(opts.log_level));
 

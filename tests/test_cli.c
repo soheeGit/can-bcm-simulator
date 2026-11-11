@@ -85,6 +85,26 @@ static void test_out_option(void) {
     ASSERT_EQ(CLI_ERROR, cli_parse(ARGC(d), d, &o, NULL));
 }
 
+static void test_iface_option(void) {
+    char *a[] = {"bcm_sim", "--iface", "vcan0", "--dump", NULL};
+    char *b[] = {"bcm_sim", "-i", "vcan0", "-d", "-l", "debug", NULL};
+    char *both[] = {"bcm_sim", "-f", "a.log", "-i", "vcan0", "-d", NULL};   /* 둘 다 */
+    char *none[] = {"bcm_sim", "-l", "info", NULL};                         /* 둘 다 없음 */
+    char *dump_only[] = {"bcm_sim", "-f", "a.log", "--dump", NULL};         /* --dump는 --iface와 */
+    char *iface_only[] = {"bcm_sim", "-i", "vcan0", NULL};                  /* 지금은 --dump 필요 */
+    CliOptions o;
+    ASSERT_EQ(CLI_OK, cli_parse(ARGC(a), a, &o, NULL));
+    ASSERT_TRUE(strcmp("vcan0", o.iface) == 0);
+    ASSERT_TRUE(o.dump);
+    ASSERT_TRUE(o.file == NULL);
+    ASSERT_EQ(CLI_OK, cli_parse(ARGC(b), b, &o, NULL));
+    ASSERT_EQ(LOG_LEVEL_DEBUG, o.log_level);
+    ASSERT_EQ(CLI_ERROR, cli_parse(ARGC(both), both, &o, NULL));
+    ASSERT_EQ(CLI_ERROR, cli_parse(ARGC(none), none, &o, NULL));
+    ASSERT_EQ(CLI_ERROR, cli_parse(ARGC(dump_only), dump_only, &o, NULL));
+    ASSERT_EQ(CLI_ERROR, cli_parse(ARGC(iface_only), iface_only, &o, NULL));
+}
+
 static void test_parse_twice(void) {
     /* getopt 상태를 되돌리지 않으면 두 번째 해석이 틀어진다 (reset_getopt 확인) */
     char *a[] = {"bcm_sim", "--file", "first.log", NULL};
@@ -105,6 +125,7 @@ int main(void) {
     RUN_TEST(test_help_and_version);
     RUN_TEST(test_errors);
     RUN_TEST(test_out_option);
+    RUN_TEST(test_iface_option);
     RUN_TEST(test_parse_twice);
     return TEST_SUMMARY();
 }
