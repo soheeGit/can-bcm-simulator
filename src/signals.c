@@ -193,3 +193,50 @@ bool decode_bcm_status(const CanFrame *f, BcmStatusMsg *out) {
     out->alive_counter  = (uint8_t)can_get_bits(f->data, BCM_STATUS_ALIVE_START_BIT, BCM_STATUS_ALIVE_LENGTH);
     return true;
 }
+
+/* ---------- 한 줄 설명 (M5-4) ---------- */
+
+void can_frame_describe(const CanFrame *f, char *buf, size_t size) {
+    if (buf == NULL || size == 0u) {
+        return;
+    }
+    if (f == NULL) {
+        snprintf(buf, size, "(null)");
+        return;
+    }
+    char tmp[64];
+    switch (f->id) {
+        case MSG_ID_VEHICLE_SPEED: {
+            VehicleSpeed s;
+            if (!decode_vehicle_speed(f, &s)) { break; }
+            vehicle_speed_format(&s, tmp, sizeof(tmp));
+            snprintf(buf, size, "차속 %s", tmp);
+            return;
+        }
+        case MSG_ID_DOOR_STATUS: {
+            DoorStatus d;
+            if (!decode_door_status(f, &d)) { break; }
+            door_status_format(&d, tmp, sizeof(tmp));
+            snprintf(buf, size, "도어 %s", tmp);
+            return;
+        }
+        case MSG_ID_IGN_STATUS: {
+            IgnStatus g;
+            if (!decode_ign_status(f, &g)) { break; }
+            ign_status_format(&g, tmp, sizeof(tmp));
+            snprintf(buf, size, "시동 %s", tmp);
+            return;
+        }
+        case MSG_ID_BCM_STATUS: {
+            BcmStatusMsg m;
+            if (!decode_bcm_status(f, &m)) { break; }
+            snprintf(buf, size, "BCM 상태=%u 잠금=%d 경고음=%d alive=%u",
+                     (unsigned)m.state, m.door_lock_cmd ? 1 : 0, m.warning_buzzer ? 1 : 0, (unsigned)m.alive_counter);
+            return;
+        }
+        default:
+            snprintf(buf, size, "-");
+            return;
+    }
+    snprintf(buf, size, "해석 불가");               /* 우리 ID인데 디코더가 거절함 */
+}
