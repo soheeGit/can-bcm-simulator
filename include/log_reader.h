@@ -1,53 +1,28 @@
-/* 로그 파일 읽기 — 파일을 한 줄씩 읽어 파서(M3-2) → 디스패처(M2-6)로 흘려보낸다
+/* 로그 파일 읽기 — 파일 소스(file_source.h)를 프레임 루프(frame_loop.h)에 끼워서 돌린다
  *
- *   파일 ──fgets──→ 한 줄 ──parse_candump_line()──→ CanFrame + 시각 ──can_dispatch()──→ VehicleInputs
- *                                                                              ──bcm_step()──→ BCM 상태 (M4)
+ *   파일 ──FileSource──→ CanFrame + 시각 ──frame_loop_run()──→ 디스패처 → BCM → 0x400
  *
- * 잘못된 줄은 줄 번호와 이유를 WARN 로그로 찍고 다음 줄로 넘어간다 (멈추지 않는다).
- * 값이 바뀌면 INFO, 모든 프레임은 DEBUG 로그로 찍는다 (logger.h, M3-5).
- * BCM 상태가 바뀌면 "STATE IDLE -> DRIVING_LOCKED (T3: ...)"를 INFO로 찍는다 (M4-3).
- * BCM이 100ms마다 만드는 0x400 BCM_STATUS를 candump 형식으로 파일에 쓸 수 있다 (M4-8, --out).
+ * M3에서는 이 파일에 "줄 읽기 + 파싱 + 디스패치 + BCM"이 다 있었다.
+ * M5-5에서 소켓도 같은 루프를 쓰도록 둘로 나눴다: 줄 읽기는 file_source.c, 나머지는 frame_loop.c.
+ * 함수 이름과 인자는 그대로라 기존 코드와 테스트는 바뀌지 않는다.
  */
 #ifndef LOG_READER_H
 #define LOG_READER_H
 
-#include <stdint.h>
 #include <stdio.h>
 
 #include "bcm.h"
 #include "dispatcher.h"
+#include "file_source.h"
+#include "frame_loop.h"
 
-/* 한 줄을 담을 버퍼 크기. 정상 줄은 최대 60자 정도라 넉넉하게 */
-#define LOG_LINE_MAX 128u
-
-/* 상태 전이를 앞에서부터 몇 개까지 기록할지 (시나리오 통합 테스트용, M4-7). 넘치면 횟수만 센다 */
-#define LOG_MAX_TRANSITIONS 16u
-
-/* 상태 전이 한 번의 기록: "몇 초에, 어디서 어디로, 어떤 규칙으로" */
-typedef struct {
-    uint32_t t_ms;
-    BcmState from;
-    BcmState to;
-    BcmRule  rule;
-} BcmTransitionRecord;
-
-typedef struct {
-    uint32_t lines;          /* 읽은 줄 수 (빈 줄, 주석 포함) */
-    uint32_t frames;         /* 파싱에 성공한 프레임 수 */
-    uint32_t skipped;        /* 빈 줄 / 주석 */
-    uint32_t parse_errors;   /* 형식이 틀린 줄 (너무 긴 줄 포함) */
-    DispatchStats dispatch;  /* 파싱된 프레임의 디스패처 결과 (ok / ignored / error) */
-    uint32_t bcm_transitions;  /* BCM 상태가 바뀐 횟수 (bcm이 NULL이면 0) */
-    uint32_t bcm_lock_cmds;    /* 도어 잠금 명령 횟수 */
-    uint32_t tx_frames;        /* 만든 0x400 프레임 수 (M4-8) */
-    BcmTransitionRecord transitions[LOG_MAX_TRANSITIONS];   /* 앞에서부터 최대 LOG_MAX_TRANSITIONS개 */
-} LogReadStats;
+/* 예전 이름 (M3 ~ M4). 같은 것이다 */
+#define LOG_LINE_MAX FILE_SOURCE_LINE_MAX
+#define LOG_MAX_TRANSITIONS FRAME_LOOP_MAX_TRANSITIONS
+typedef FrameLoopStats LogReadStats;
 
 /* 이미 열린 스트림에서 끝까지 읽는다 (테스트에서는 메모리 문자열을 스트림으로 넘길 수 있다)
- * - inputs: 프레임을 반영할 차량 상태 (미리 vehicle_inputs_init 해 둘 것)
- * - bcm: 프레임마다 bcm_step을 돌릴 BCM (미리 bcm_init 해 둘 것). NULL이면 BCM 없이 읽기만 한다
- * - tx_out: BCM이 보내는 0x400을 candump 형식으로 쓸 곳 (M4-8). NULL이면 안 쓴다
- * - stats: 결과 통계 (0으로 초기화해서 채운다)
+ * 인자는 frame_loop_run()과 같다. stats의 lines / skipped / parse_errors도 채운다
  * 반환값: 0 = 끝까지 읽음, -1 = 인자가 NULL이거나 읽는 도중 입출력 오류 */
 int log_read_stream(FILE *in, VehicleInputs *inputs, BcmContext *bcm, FILE *tx_out, LogReadStats *stats);
 
