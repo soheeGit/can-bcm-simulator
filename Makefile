@@ -17,7 +17,7 @@ endif
 TARGET := $(BUILD)/bcm_sim
 
 # Linux 전용 코드 (SocketCAN, M5): macOS에서는 빌드에서 뺀다
-LINUX_ONLY    := src/can_socket.c src/can_dump.c
+LINUX_ONLY    := src/can_socket.c src/can_dump.c src/socket_source.c
 LINUX_TESTS   := tests/test_can_socket.c
 
 SRCS := $(wildcard src/*.c)
