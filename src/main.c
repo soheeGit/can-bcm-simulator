@@ -6,6 +6,7 @@
 #include "cli.h"
 #if defined(__linux__)
 #include "can_dump.h"
+#include "socket_source.h"
 #endif
 #include "dispatcher.h"
 #include "log_reader.h"
@@ -58,19 +59,21 @@ int main(int argc, char *argv[]) {
 
     log_set_level(opts.log_level);
 
-    if (opts.iface != NULL) {               /* 실시간 CAN (M5) */
 #if defined(__linux__)
+    if (opts.dump) {                        /* 덤프 모드 (M5-4): BCM 없이 찍기만 */
         LOG_INFO("can-bcm-simulator %s 시작: %s 덤프 (로그 레벨 %s)",
                  BCM_SIM_VERSION, opts.iface, log_level_name(opts.log_level));
         return can_dump_run(opts.iface) == 0 ? EXIT_OK : EXIT_FAIL;
+    }
 #else
+    if (opts.iface != NULL) {
         fprintf(stderr, "--iface는 Linux(SocketCAN)에서만 됩니다. VM에서 실행하세요: multipass shell can-vm\n");
         return EXIT_USAGE;
-#endif
     }
+#endif
 
-    LOG_INFO("can-bcm-simulator %s 시작: %s (로그 레벨 %s)",
-             BCM_SIM_VERSION, opts.file, log_level_name(opts.log_level));
+    LOG_INFO("can-bcm-simulator %s 시작: %s (로그 레벨 %s)", BCM_SIM_VERSION,
+             opts.file != NULL ? opts.file : opts.iface, log_level_name(opts.log_level));
 
     VehicleInputs in;
     BcmContext bcm;
@@ -87,7 +90,22 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    int result = log_read_file(opts.file, &in, &bcm, tx_out, &stats);
+    /* 입력 소스만 다르고, 그 뒤(디스패처 → BCM → 0x400)는 같은 frame_loop_run()이다 (M5-5) */
+    int result = -1;
+    if (opts.file != NULL) {
+        result = log_read_file(opts.file, &in, &bcm, tx_out, &stats);      /* FileSource */
+    }
+#if defined(__linux__)
+    else {
+        SocketSource ss;
+        if (socket_source_open(&ss, opts.iface) == 0) {
+            CanSource src = socket_source_as_can_source(&ss);
+            LOG_INFO("%s에서 받는 중... (Ctrl+C로 종료)", opts.iface);
+            result = frame_loop_run(&src, &in, &bcm, tx_out, &stats);    /* 소켓은 끝이 없다: 오류일 때만 돌아온다 */
+            socket_source_close(&ss);
+        }
+    }
+#endif
     if (tx_out != NULL) {
         fclose(tx_out);
     }

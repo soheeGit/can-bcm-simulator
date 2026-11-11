@@ -17,12 +17,12 @@ static void reset_getopt(void) {
 void cli_print_usage(FILE *out, const char *prog) {
     fprintf(out,
             "사용법: %s --file <로그 파일> [--log-level <레벨>] [--out <출력 파일>]\n"
-            "        %s --iface <CAN 장치> --dump [--log-level <레벨>]          (Linux)\n"
+            "        %s --iface <CAN 장치> [--dump] [--log-level <레벨>] [--out <출력 파일>]   (Linux)\n"
             "\n"
             "옵션:\n"
             "  -f, --file <경로>         읽을 candump 로그 파일\n"
-            "  -i, --iface <이름>        CAN 장치에서 실시간으로 받기 (예: vcan0, Linux 전용)\n"
-            "  -d, --dump                받는 프레임을 해석해서 찍기 (--iface와 같이)\n"
+            "  -i, --iface <이름>        CAN 장치에서 실시간으로 받아 BCM 실행 (예: vcan0, Linux 전용)\n"
+            "  -d, --dump                BCM 없이 받는 프레임을 해석해서 찍기만 (--iface와 같이)\n"
             "  -l, --log-level <레벨>    debug | info | warn | error | off (기본: info)\n"
             "  -o, --out <경로>          BCM이 보내는 0x400 BCM_STATUS를 candump 형식으로 저장\n"
             "  -h, --help                이 도움말\n"
@@ -126,12 +126,6 @@ CliResult cli_parse(int argc, char *argv[], CliOptions *opts, FILE *err) {
     if (opts->dump && opts->iface == NULL) {
         if (err != NULL) {
             fprintf(err, "--dump는 --iface와 같이 씁니다\n");
-        }
-        return CLI_ERROR;
-    }
-    if (opts->iface != NULL && !opts->dump) {
-        if (err != NULL) {
-            fprintf(err, "--iface는 지금(M5-4)은 --dump와 같이만 됩니다\n");
         }
         return CLI_ERROR;
     }

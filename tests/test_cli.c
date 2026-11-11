@@ -91,7 +91,7 @@ static void test_iface_option(void) {
     char *both[] = {"bcm_sim", "-f", "a.log", "-i", "vcan0", "-d", NULL};   /* 둘 다 */
     char *none[] = {"bcm_sim", "-l", "info", NULL};                         /* 둘 다 없음 */
     char *dump_only[] = {"bcm_sim", "-f", "a.log", "--dump", NULL};         /* --dump는 --iface와 */
-    char *iface_only[] = {"bcm_sim", "-i", "vcan0", NULL};                  /* 지금은 --dump 필요 */
+    char *iface_only[] = {"bcm_sim", "-i", "vcan0", "-o", "r.log", NULL};   /* --dump 없이 = 실시간 BCM (M5-5) */
     CliOptions o;
     ASSERT_EQ(CLI_OK, cli_parse(ARGC(a), a, &o, NULL));
     ASSERT_TRUE(strcmp("vcan0", o.iface) == 0);
@@ -102,7 +102,9 @@ static void test_iface_option(void) {
     ASSERT_EQ(CLI_ERROR, cli_parse(ARGC(both), both, &o, NULL));
     ASSERT_EQ(CLI_ERROR, cli_parse(ARGC(none), none, &o, NULL));
     ASSERT_EQ(CLI_ERROR, cli_parse(ARGC(dump_only), dump_only, &o, NULL));
-    ASSERT_EQ(CLI_ERROR, cli_parse(ARGC(iface_only), iface_only, &o, NULL));
+    ASSERT_EQ(CLI_OK, cli_parse(ARGC(iface_only), iface_only, &o, NULL));
+    ASSERT_FALSE(o.dump);
+    ASSERT_TRUE(strcmp("r.log", o.out_file) == 0);
 }
 
 static void test_parse_twice(void) {
