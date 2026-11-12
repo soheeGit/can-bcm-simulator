@@ -48,4 +48,15 @@ typedef enum {
  * read(fd, &frame, sizeof(struct can_frame))가 정확히 그 크기를 돌려줘야 정상 */
 CanReadResult can_socket_read(int fd, CanFrame *out);
 
+/* ---------- 보내기 (M5-6) ---------- */
+
+/* 우리 CanFrame → Linux의 struct can_frame (can_frame_from_linux의 반대 방향).
+ * Standard ID(0x7FF 이하), DLC 8 이하만 true. 아니면(또는 NULL) false */
+bool can_frame_to_linux(const CanFrame *in, struct can_frame *out);
+
+/* 프레임 하나를 보낸다. 0 = 성공, -1 = 실패 (변환 실패면 errno = EINVAL, write 실패면 perror)
+ * write(fd, &frame, sizeof(struct can_frame))가 정확히 그 크기를 돌려줘야 성공.
+ * 실제 CAN에서는 받는 노드가 없어 ACK가 안 오면 송신 큐가 차서 ENOBUFS로 실패할 수 있다 */
+int can_socket_write(int fd, const CanFrame *f);
+
 #endif

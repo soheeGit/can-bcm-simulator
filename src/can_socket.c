@@ -94,3 +94,38 @@ CanReadResult can_socket_read(int fd, CanFrame *out) {
     }
     return can_frame_from_linux(&raw, out) ? CAN_READ_OK : CAN_READ_SKIP;
 }
+
+/* ---------- 보내기 (M5-6) ---------- */
+
+bool can_frame_to_linux(const CanFrame *in, struct can_frame *out) {
+    if (in == NULL || out == NULL) {
+        return false;
+    }
+    if (in->id > CAN_FRAME_STD_ID_MAX || in->dlc > CAN_FRAME_MAX_DLC) {
+        return false;
+    }
+    memset(out, 0, sizeof(*out));                   /* __pad, __res0 같은 예약 칸까지 0으로 */
+    out->can_id = in->id;                           /* 표시(flag) 비트는 0 = 일반 11비트 데이터 프레임 */
+    out->len = in->dlc;
+    memcpy(out->data, in->data, in->dlc);
+    return true;
+}
+
+int can_socket_write(int fd, const CanFrame *f) {
+    struct can_frame raw;
+    if (!can_frame_to_linux(f, &raw)) {
+        errno = EINVAL;
+        perror("can_socket_write: 프레임");
+        return -1;
+    }
+    ssize_t n = write(fd, &raw, sizeof(raw));
+    if (n < 0) {
+        perror("write(CAN)");
+        return -1;
+    }
+    if ((size_t)n != sizeof(raw)) {                 /* CAN_RAW는 프레임 하나를 통째로 보낸다. 모자라면 이상한 것 */
+        fprintf(stderr, "write(CAN): %zd바이트 (기대 %zu)\n", n, sizeof(raw));
+        return -1;
+    }
+    return 0;
+}
