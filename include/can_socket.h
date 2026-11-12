@@ -12,6 +12,8 @@
 #define CAN_SOCKET_H
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <linux/can.h>
 
@@ -58,5 +60,20 @@ bool can_frame_to_linux(const CanFrame *in, struct can_frame *out);
  * write(fd, &frame, sizeof(struct can_frame))가 정확히 그 크기를 돌려줘야 성공.
  * 실제 CAN에서는 받는 노드가 없어 ACK가 안 오면 송신 큐가 차서 ENOBUFS로 실패할 수 있다 */
 int can_socket_write(int fd, const CanFrame *f);
+
+/* ---------- 수신 필터 (M5-7) ---------- */
+
+/* 필터는 최대 몇 개까지 (우리는 3개면 충분. 커널은 더 많이 받는다) */
+#define CAN_SOCKET_MAX_FILTERS 16u
+
+/* "정확히 이 ID의 일반(11비트) 데이터 프레임만"을 뜻하는 필터 한 칸을 만든다.
+ * 커널 규칙: (받은 can_id & can_mask) == (filter.can_id & can_mask) 이면 통과 (candump의 ID:마스크와 같다) */
+void can_filter_exact(struct can_filter *f, uint32_t id);
+
+/* fd가 ids에 있는 ID만 받게 한다 (커널이 걸러 준다. 나머지는 read()에 아예 안 온다)
+ * - count가 0이면 아무것도 안 받는다 (커널 규칙)
+ * - ids가 NULL인데 count > 0, 또는 count > CAN_SOCKET_MAX_FILTERS → -1, errno = EINVAL
+ * 반환값: 0 = 성공, -1 = 실패 (perror) */
+int can_socket_set_filter(int fd, const uint32_t *ids, size_t count);
 
 #endif

@@ -129,3 +129,31 @@ int can_socket_write(int fd, const CanFrame *f) {
     }
     return 0;
 }
+
+/* ---------- 수신 필터 (M5-7) ---------- */
+
+void can_filter_exact(struct can_filter *f, uint32_t id) {
+    f->can_id = id;
+    /* 비교할 비트: ID 11비트 전부 + EFF + RTR 표시.
+     * 표시 비트까지 비교해야 "29비트 ID 0x100"이나 "Remote 0x100"이 섞여 들어오지 않는다 (둘 다 0이어야 통과) */
+    f->can_mask = CAN_SFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG;
+}
+
+int can_socket_set_filter(int fd, const uint32_t *ids, size_t count) {
+    if ((ids == NULL && count > 0u) || count > CAN_SOCKET_MAX_FILTERS) {
+        errno = EINVAL;
+        perror("can_socket_set_filter: 필터 목록");
+        return -1;
+    }
+    struct can_filter filters[CAN_SOCKET_MAX_FILTERS];
+    for (size_t i = 0; i < count; i++) {
+        can_filter_exact(&filters[i], ids[i]);
+    }
+    /* 소켓 옵션으로 커널에 필터 목록을 넘긴다. 0개면 (NULL, 0) = 아무것도 안 받음 */
+    if (setsockopt(fd, SOL_CAN_RAW, CAN_RAW_FILTER, count > 0u ? filters : NULL,
+                   (socklen_t)(count * sizeof(struct can_filter))) < 0) {
+        perror("setsockopt(CAN_RAW_FILTER)");
+        return -1;
+    }
+    return 0;
+}

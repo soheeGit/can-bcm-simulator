@@ -1,10 +1,11 @@
-/* SocketCAN 소켓 테스트: 열기(M5-3), 받기(M5-4), 보내기(M5-6). Linux 전용
+/* SocketCAN 소켓 테스트: 열기(M5-3), 받기(M5-4), 보내기(M5-6), 수신 필터(M5-7). Linux 전용
  *
  * vcan0이 있어야 하는 테스트는, vcan0이 없으면 건너뛴다 (VM에서 ./scripts/setup_vcan.sh 먼저)
  * 다른 테스트들은 /dev/null로 stderr를 버리지 않으니, 실패 케이스의 perror 메시지가 화면에 같이 보인다 (정상)
  */
 #include <errno.h>
 #include <net/if.h>
+#include <poll.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -220,6 +221,90 @@ static void test_write_to_vcan0(void) {
     can_socket_close(tx);
 }
 
+/* ---------- 수신 필터 (M5-7) ---------- */
+
+/* 최대 100ms만 기다려서 하나 받아 보기. 없으면 -1
+ * (필터에 막혀 "안 왔다"를 확인하려면 끝없이 기다리는 read()는 못 쓴다. poll은 M5-8에서 자세히) */
+static int try_read_id(int fd, uint32_t *id) {
+    struct pollfd p = { .fd = fd, .events = POLLIN };
+    if (poll(&p, 1, 100) <= 0) {
+        return -1;
+    }
+    struct can_frame raw;
+    ssize_t n = read(fd, &raw, sizeof(raw));
+    if (n != (ssize_t)sizeof(raw)) {
+        return -1;
+    }
+    *id = raw.can_id;
+    return 0;
+}
+
+static void send_id(int tx, canid_t id) {
+    struct can_frame f = linux_frame(id, 1u, 0x00, 0x00);
+    ASSERT_EQ((long)sizeof(f), (long)write(tx, &f, sizeof(f)));
+}
+
+static void test_filter_exact_mask(void) {
+    struct can_filter f;
+    can_filter_exact(&f, 0x200u);
+    ASSERT_EQ(0x200u, f.can_id);
+    ASSERT_EQ(CAN_SFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG, f.can_mask);
+    /* 커널 규칙으로 직접 계산: (받은 ID & mask) == (0x200 & mask) 인가 */
+    ASSERT_TRUE((0x200u & f.can_mask) == (f.can_id & f.can_mask));
+    ASSERT_FALSE((0x201u & f.can_mask) == (f.can_id & f.can_mask));
+    ASSERT_FALSE((0x600u & f.can_mask) == (f.can_id & f.can_mask));                  /* 0x200:3FF였다면 통과했을 것 */
+    ASSERT_FALSE(((0x200u | CAN_RTR_FLAG) & f.can_mask) == (f.can_id & f.can_mask));  /* Remote 0x200 */
+    ASSERT_FALSE(((0x200u | CAN_EFF_FLAG) & f.can_mask) == (f.can_id & f.can_mask));  /* 29비트 ID 0x200 */
+}
+
+static void test_filter_bad_args(void) {
+    printf("    (아래 필터 목록 에러 메시지 2개는 일부러 낸 것)\n");
+    uint32_t ids[CAN_SOCKET_MAX_FILTERS + 1u] = {0};
+    errno = 0;
+    ASSERT_EQ(-1, can_socket_set_filter(0, NULL, 1u));
+    ASSERT_EQ(EINVAL, errno);
+    errno = 0;
+    ASSERT_EQ(-1, can_socket_set_filter(0, ids, CAN_SOCKET_MAX_FILTERS + 1u));
+    ASSERT_EQ(EINVAL, errno);
+}
+
+static void test_filter_on_vcan0(void) {
+    if (!vcan0_exists()) {
+        printf("    (vcan0 없음: 건너뜀. ./scripts/setup_vcan.sh)\n");
+        return;
+    }
+    int rx = can_socket_open("vcan0");
+    int tx = can_socket_open("vcan0");
+    ASSERT_TRUE(rx >= 0 && tx >= 0);
+    if (rx < 0 || tx < 0) {
+        return;
+    }
+    const uint32_t ids[] = { 0x100u, 0x300u };
+    ASSERT_EQ(0, can_socket_set_filter(rx, ids, 2u));
+
+    send_id(tx, 0x200u);                                   /* 막힘 */
+    send_id(tx, 0x100u);                                   /* 통과 */
+    send_id(tx, 0x7FFu);                                   /* 막힘 */
+    send_id(tx, 0x100u | CAN_EFF_FLAG);                    /* 29비트 0x100 → 막힘 */
+    send_id(tx, 0x300u | CAN_RTR_FLAG);                    /* Remote 0x300 → 막힘 */
+    send_id(tx, 0x300u);                                   /* 통과 */
+
+    uint32_t id = 0u;
+    ASSERT_EQ(0, try_read_id(rx, &id));
+    ASSERT_EQ(0x100u, id);
+    ASSERT_EQ(0, try_read_id(rx, &id));
+    ASSERT_EQ(0x300u, id);
+    ASSERT_EQ(-1, try_read_id(rx, &id));                   /* 나머지 4개는 커널이 걸렀다 */
+
+    /* 0개 = 아무것도 안 받음 */
+    ASSERT_EQ(0, can_socket_set_filter(rx, NULL, 0u));
+    send_id(tx, 0x100u);
+    ASSERT_EQ(-1, try_read_id(rx, &id));
+
+    can_socket_close(rx);
+    can_socket_close(tx);
+}
+
 int main(void) {
     printf("[test_can_socket]\n");
     RUN_TEST(test_open_vcan0);
@@ -232,5 +317,8 @@ int main(void) {
     RUN_TEST(test_to_linux_standard);
     RUN_TEST(test_to_linux_rejects);
     RUN_TEST(test_write_to_vcan0);
+    RUN_TEST(test_filter_exact_mask);
+    RUN_TEST(test_filter_bad_args);
+    RUN_TEST(test_filter_on_vcan0);
     return TEST_SUMMARY();
 }
