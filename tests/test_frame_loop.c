@@ -19,20 +19,28 @@ typedef struct {
     size_t count;
     size_t next;
     size_t fail_at;          /* 이 번호에서 ERROR를 준다 (안 쓰면 count보다 크게) */
+    uint32_t silence_until;  /* M5-8: 프레임이 다 떨어진 뒤 이 시각(ms)까지 "아무것도 안 옴"(TIMEOUT)을 흉내. 0이면 바로 END */
+    uint32_t now;            /* 가짜 시계: 마지막으로 돌려준 시각 */
 } ArraySource;
 
-static CanSourceResult array_source_read(void *self, CanFrame *out, uint32_t *ts_ms) {
+static CanSourceResult array_source_read(void *self, CanFrame *out, uint32_t *ts_ms, int timeout_ms) {
     ArraySource *as = self;
     if (as->next == as->fail_at) {
         return CAN_SOURCE_ERROR;
     }
-    if (as->next >= as->count) {
-        return CAN_SOURCE_END;
+    if (as->next < as->count) {
+        *out = as->frames[as->next];
+        *ts_ms = as->now = as->ts_ms[as->next];
+        as->next++;
+        return CAN_SOURCE_OK;
     }
-    *out = as->frames[as->next];
-    *ts_ms = as->ts_ms[as->next];
-    as->next++;
-    return CAN_SOURCE_OK;
+    /* 프레임이 더 없다: 기다리는 시간만큼 시계를 돌리고 TIMEOUT (진짜 소켓의 poll처럼) */
+    if (timeout_ms >= 0 && as->now + (uint32_t)timeout_ms <= as->silence_until) {
+        as->now += (uint32_t)timeout_ms;
+        *ts_ms = as->now;
+        return CAN_SOURCE_TIMEOUT;
+    }
+    return CAN_SOURCE_END;
 }
 
 static CanSource array_source(ArraySource *as) {
@@ -42,7 +50,7 @@ static CanSource array_source(ArraySource *as) {
 
 /* ---------- 가짜 출력: 받은 프레임을 배열에 모아 둔다 (M5-6) ---------- */
 
-#define ARRAY_SINK_MAX 16u
+#define ARRAY_SINK_MAX 32u
 
 typedef struct {
     CanFrame frames[ARRAY_SINK_MAX];
@@ -86,7 +94,7 @@ static void test_reads_until_end(void) {
         frame2(0x7FFu, 1u, 0x00, 0x00),       /* 모르는 ID → ignored */
     };
     const uint32_t ts[] = { 0u, 100u, 250u };
-    ArraySource as = { frames, ts, 3u, 0u, 99u };
+    ArraySource as = { frames, ts, 3u, 0u, 99u, 0u, 0u };
     CanSource src = array_source(&as);
     VehicleInputs in;
     FrameLoopStats s;
@@ -104,7 +112,7 @@ static void test_reads_until_end(void) {
 static void test_source_error_stops(void) {
     const CanFrame frames[] = { frame2(0x100u, 8u, 0x10, 0x27), frame2(0x100u, 8u, 0x20, 0x4E) };
     const uint32_t ts[] = { 0u, 100u };
-    ArraySource as = { frames, ts, 2u, 0u, 1u };                  /* 두 번째에서 ERROR */
+    ArraySource as = { frames, ts, 2u, 0u, 1u, 0u, 0u };                  /* 두 번째에서 ERROR */
     CanSource src = array_source(&as);
     VehicleInputs in;
     FrameLoopStats s;
@@ -131,7 +139,7 @@ static void test_runs_bcm(void) {
     CanFrame frames[30];
     uint32_t ts[30];
     make_drive(frames, ts);
-    ArraySource as = { frames, ts, 30u, 0u, 99u };
+    ArraySource as = { frames, ts, 30u, 0u, 99u, 0u, 0u };
     CanSource src = array_source(&as);
     VehicleInputs in;
     BcmContext bcm;
@@ -152,7 +160,7 @@ static void test_sinks_get_tx(void) {
     CanFrame frames[30];
     uint32_t ts[30];
     make_drive(frames, ts);
-    ArraySource as = { frames, ts, 30u, 0u, 99u };
+    ArraySource as = { frames, ts, 30u, 0u, 99u, 0u, 0u };
     CanSource src = array_source(&as);
     ArraySink a = {0}, b = {0};
     CanSink sinks[2] = { array_sink(&a), array_sink(&b) };
@@ -180,7 +188,7 @@ static void test_sink_failure_keeps_running(void) {
     CanFrame frames[30];
     uint32_t ts[30];
     make_drive(frames, ts);
-    ArraySource as = { frames, ts, 30u, 0u, 99u };
+    ArraySource as = { frames, ts, 30u, 0u, 99u, 0u, 0u };
     CanSource src = array_source(&as);
     ArraySink bad = { .fail = true }, good = {0};
     CanSink sinks[2] = { array_sink(&bad), array_sink(&good) };
@@ -198,6 +206,47 @@ static void test_sink_failure_keeps_running(void) {
     ASSERT_EQ(30, s.frames);
 }
 
+static void test_silence_keeps_judging(void) {
+    /* M5-8: 1초 달리다가 프레임이 뚝 끊기고(선이 빠짐) 1.1초 동안 아무것도 안 온다.
+     * 프레임이 없어도 10ms마다 판단 → 0x400은 계속 나가고, 500ms 뒤 신호 끊김으로 WARNING (T5) */
+    CanFrame frames[30];
+    uint32_t ts[30];
+    make_drive(frames, ts);                                       /* 마지막 프레임 900ms */
+    ArraySource as = { frames, ts, 30u, 0u, 99u, 2000u, 0u };    /* 2000ms까지 조용 */
+    CanSource src = array_source(&as);
+    ArraySink sink = {0};
+    CanSink sinks[1] = { array_sink(&sink) };
+    VehicleInputs in;
+    BcmContext bcm;
+    FrameLoopStats s;
+    vehicle_inputs_init(&in);
+    bcm_init(&bcm);
+
+    ASSERT_EQ(0, frame_loop_run(&src, &in, &bcm, sinks, 1u, &s));
+    ASSERT_EQ(30, s.frames);
+    ASSERT_EQ(110, s.ticks);                                      /* 910, 920, ..., 2000ms */
+    ASSERT_EQ(21, s.tx_frames);                                   /* 0 ~ 2000ms, 100ms마다 (조용할 때도 11개) */
+    ASSERT_EQ(2, s.bcm_transitions);
+    ASSERT_EQ(BCM_RULE_T5, s.transitions[1].rule);                /* 신호 끊김 → WARNING */
+    ASSERT_EQ(1410u, s.transitions[1].t_ms);                      /* 마지막 수신 900 + 500ms 초과 = 첫 판단 1410ms */
+    ASSERT_EQ(BCM_STATE_WARNING, bcm.state);
+    ASSERT_EQ(BCM_STATE_WARNING, sink.frames[20].data[0]);        /* 마지막 0x400에도 WARNING이 실린다 */
+}
+
+static void test_no_tick_without_bcm(void) {
+    /* BCM이 없으면(NULL) 시간만 흘러도 할 일이 없다: 세기만 하고 죽지 않는다 */
+    CanFrame frames[1] = { frame2(0x100u, 8u, 0x10, 0x27) };
+    uint32_t ts[1] = { 0u };
+    ArraySource as = { frames, ts, 1u, 0u, 99u, 100u, 0u };
+    CanSource src = array_source(&as);
+    VehicleInputs in;
+    FrameLoopStats s;
+    vehicle_inputs_init(&in);
+    ASSERT_EQ(0, frame_loop_run(&src, &in, NULL, NULL, 0u, &s));
+    ASSERT_EQ(10, s.ticks);
+    ASSERT_EQ(0, s.tx_frames);
+}
+
 static void test_null_args(void) {
     VehicleInputs in;
     FrameLoopStats s;
@@ -205,7 +254,7 @@ static void test_null_args(void) {
     vehicle_inputs_init(&in);
     ASSERT_EQ(-1, frame_loop_run(NULL, &in, NULL, NULL, 0u, &s));
     ASSERT_EQ(-1, frame_loop_run(&empty, &in, NULL, NULL, 0u, &s));   /* NULL 함수를 부르면 죽는다 → 미리 막기 */
-    ArraySource as = { NULL, NULL, 0u, 0u, 99u };
+    ArraySource as = { NULL, NULL, 0u, 0u, 99u, 0u, 0u };
     CanSource src = array_source(&as);
     ASSERT_EQ(-1, frame_loop_run(&src, &in, NULL, NULL, 1u, &s));      /* 출력이 1개라면서 NULL */
 }
@@ -218,6 +267,8 @@ int main(void) {
     RUN_TEST(test_runs_bcm);
     RUN_TEST(test_sinks_get_tx);
     RUN_TEST(test_sink_failure_keeps_running);
+    RUN_TEST(test_silence_keeps_judging);
+    RUN_TEST(test_no_tick_without_bcm);
     RUN_TEST(test_null_args);
     return TEST_SUMMARY();
 }

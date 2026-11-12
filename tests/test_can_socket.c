@@ -1,4 +1,4 @@
-/* SocketCAN 소켓 테스트: 열기(M5-3), 받기(M5-4), 보내기(M5-6), 수신 필터(M5-7). Linux 전용
+/* SocketCAN 소켓 테스트: 열기(M5-3), 받기(M5-4), 보내기(M5-6), 수신 필터(M5-7), 시간 제한(M5-8). Linux 전용
  *
  * vcan0이 있어야 하는 테스트는, vcan0이 없으면 건너뛴다 (VM에서 ./scripts/setup_vcan.sh 먼저)
  * 다른 테스트들은 /dev/null로 stderr를 버리지 않으니, 실패 케이스의 perror 메시지가 화면에 같이 보인다 (정상)
@@ -14,6 +14,8 @@
 #include <unistd.h>
 
 #include "can_socket.h"
+#include "logger.h"
+#include "socket_source.h"
 #include "test_framework.h"
 
 static int vcan0_exists(void) {
@@ -305,8 +307,43 @@ static void test_filter_on_vcan0(void) {
     can_socket_close(tx);
 }
 
+/* ---------- 기다리는 시간 제한 (M5-8, SocketSource) ---------- */
+
+static void test_source_timeout(void) {
+    if (!vcan0_exists()) {
+        printf("    (vcan0 없음: 건너뜀. ./scripts/setup_vcan.sh)\n");
+        return;
+    }
+    SocketSource ss;
+    ASSERT_EQ(0, socket_source_open(&ss, "vcan0", NULL, 0u));
+    CanSource src = socket_source_as_can_source(&ss);
+    int tx = can_socket_open("vcan0");
+    ASSERT_TRUE(tx >= 0);
+
+    /* 아무것도 안 보내면 50ms 뒤 TIMEOUT. 시각은 그만큼 흘러 있다 */
+    CanFrame f;
+    uint32_t t0 = 0u, t1 = 0u;
+    ASSERT_EQ(CAN_SOURCE_TIMEOUT, src.read_frame(src.self, &f, &t0, 0));     /* 0 = 기다리지 않고 바로 */
+    ASSERT_EQ(CAN_SOURCE_TIMEOUT, src.read_frame(src.self, &f, &t1, 50));
+    ASSERT_TRUE(t1 - t0 >= 45u && t1 - t0 < 200u);
+
+    /* 프레임이 있으면 기다리지 않고 OK */
+    send_id(tx, 0x100u);
+    ASSERT_EQ(CAN_SOURCE_OK, src.read_frame(src.self, &f, &t1, 1000));
+    ASSERT_EQ(0x100u, f.id);
+
+    /* 무시할 프레임(29비트)만 오면: 건너뛰고 계속 기다리다가 마감에 TIMEOUT (마감이 늘어나지 않는다) */
+    send_id(tx, 0x100u | CAN_EFF_FLAG);
+    ASSERT_EQ(CAN_SOURCE_TIMEOUT, src.read_frame(src.self, &f, &t0, 50));
+    ASSERT_EQ(1, ss.skipped);
+
+    can_socket_close(tx);
+    socket_source_close(&ss);
+}
+
 int main(void) {
     printf("[test_can_socket]\n");
+    log_set_level(LOG_LEVEL_OFF);                          /* SocketSource의 로그는 끈다 */
     RUN_TEST(test_open_vcan0);
     RUN_TEST(test_open_unknown_iface);
     RUN_TEST(test_open_bad_name);
@@ -320,5 +357,6 @@ int main(void) {
     RUN_TEST(test_filter_exact_mask);
     RUN_TEST(test_filter_bad_args);
     RUN_TEST(test_filter_on_vcan0);
+    RUN_TEST(test_source_timeout);
     return TEST_SUMMARY();
 }

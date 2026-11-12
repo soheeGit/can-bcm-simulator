@@ -115,6 +115,34 @@ static void emit_tx(const CanFrame *f, uint32_t t_ms, const CanSink *sinks, size
     }
 }
 
+/* BCM 판단 한 번 (M4-3) + 0x400 송신 (M4-8). 프레임을 받았을 때도, 10ms가 지났을 때도(M5-8) 이것 하나로 */
+static void judge(BcmContext *bcm, const VehicleInputs *inputs, uint32_t t_ms,
+                  const CanSink *sinks, size_t sink_count, FrameLoopStats *stats) {
+    BcmOutputs out;
+    bcm_step(bcm, inputs, t_ms, &out);
+    log_bcm(&out, inputs);
+    if (out.state_changed) {
+        if (stats->bcm_transitions < FRAME_LOOP_MAX_TRANSITIONS) {
+            BcmTransitionRecord *rec = &stats->transitions[stats->bcm_transitions];
+            rec->t_ms = t_ms;
+            rec->from = out.prev_state;
+            rec->to = out.state;
+            rec->rule = out.rule;
+        }
+        stats->bcm_transitions++;
+    }
+    if (out.door_lock_cmd) {
+        stats->bcm_lock_cmds++;
+    }
+
+    /* 0x400 송신: 100ms마다 */
+    CanFrame tx;
+    if (bcm_tx_poll(bcm, &out, t_ms, &tx)) {
+        stats->tx_frames++;
+        emit_tx(&tx, t_ms, sinks, sink_count, stats);
+    }
+}
+
 int frame_loop_run(const CanSource *src, VehicleInputs *inputs, BcmContext *bcm,
                    const CanSink *sinks, size_t sink_count, FrameLoopStats *stats) {
     if (src == NULL || src->read_frame == NULL || inputs == NULL || stats == NULL) {
@@ -126,49 +154,38 @@ int frame_loop_run(const CanSource *src, VehicleInputs *inputs, BcmContext *bcm,
     *stats = (FrameLoopStats){0};
 
     for (;;) {
-        /* 1) 소스에서 프레임 하나. 파일인지 소켓인지 여기서는 모른다 (인터페이스로만 부른다) */
+        /* 1) 소스에서 프레임 하나. 단, 최대 BCM_TICK_MS(10ms)만 기다린다 (M5-8)
+         *    → 판단과 판단 사이가 10ms를 넘지 않는다. 파일 소스는 기다림이 없어서 이 값을 무시한다 */
         CanFrame frame = {0};
         uint32_t t_ms = 0u;
-        CanSourceResult r = src->read_frame(src->self, &frame, &t_ms);   /* Java: src.readFrame(...). this(self)를 직접 넘긴다 */
+        CanSourceResult r = src->read_frame(src->self, &frame, &t_ms, (int)BCM_TICK_MS);
         if (r == CAN_SOURCE_END) {
             return 0;
         }
-        if (r != CAN_SOURCE_OK) {
+        if (r == CAN_SOURCE_ERROR) {
             return -1;
         }
-        stats->frames++;
         log_set_time_ms(t_ms);                      /* 이제부터 찍는 로그의 시각 */
+
+        if (r == CAN_SOURCE_TIMEOUT) {
+            /* 2') 10ms 동안 아무것도 안 옴: 새 입력은 없지만 "시간이 흘렀다"는 것만으로 판단한다
+             *     (신호 끊김 500ms, 0x400 100ms 주기는 프레임이 아니라 시간이 정한다) */
+            stats->ticks++;
+            if (bcm != NULL) {
+                judge(bcm, inputs, t_ms, sinks, sink_count, stats);
+            }
+            continue;
+        }
+        stats->frames++;
 
         /* 2) 디스패처로 (M2-6). 바뀌었는지 비교하려고 이전 상태를 복사해 둔다 */
         VehicleInputs before = *inputs;
         DispatchResult dr = can_dispatch(&frame, inputs, t_ms, &stats->dispatch);
         log_dispatch(&frame, dr, &before, inputs);
 
-        /* 3) BCM 판단 (M4-3). 디스패처가 inputs를 고친 "다음"에 부른다 */
+        /* 3) BCM 판단. 디스패처가 inputs를 고친 "다음"에 부른다 */
         if (bcm != NULL) {
-            BcmOutputs out;
-            bcm_step(bcm, inputs, t_ms, &out);
-            log_bcm(&out, inputs);
-            if (out.state_changed) {
-                if (stats->bcm_transitions < FRAME_LOOP_MAX_TRANSITIONS) {
-                    BcmTransitionRecord *rec = &stats->transitions[stats->bcm_transitions];
-                    rec->t_ms = t_ms;
-                    rec->from = out.prev_state;
-                    rec->to = out.state;
-                    rec->rule = out.rule;
-                }
-                stats->bcm_transitions++;
-            }
-            if (out.door_lock_cmd) {
-                stats->bcm_lock_cmds++;
-            }
-
-            /* 4) 0x400 송신 (M4-8): 100ms마다 */
-            CanFrame tx;
-            if (bcm_tx_poll(bcm, &out, t_ms, &tx)) {
-                stats->tx_frames++;
-                emit_tx(&tx, t_ms, sinks, sink_count, stats);
-            }
+            judge(bcm, inputs, t_ms, sinks, sink_count, stats);
         }
     }
 }

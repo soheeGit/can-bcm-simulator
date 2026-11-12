@@ -29,8 +29,9 @@ void file_source_init(FileSource *fs, FILE *in) {
 }
 
 /* CanSource.read_frame의 파일 구현. self는 FileSource*다 (인터페이스는 void*로만 들고 있다) */
-static CanSourceResult file_source_read(void *self, CanFrame *out, uint32_t *ts_ms) {
+static CanSourceResult file_source_read(void *self, CanFrame *out, uint32_t *ts_ms, int timeout_ms) {
     FileSource *fs = self;                          /* Java라면 this. C는 직접 형을 되돌린다 */
+    (void)timeout_ms;                               /* 파일은 기다릴 일이 없다: 다음 줄이 바로 있다 (TIMEOUT 없음) */
     char line[FILE_SOURCE_LINE_MAX];
 
     /* 쓸 수 있는 프레임이 나올 때까지 줄을 읽는다 */

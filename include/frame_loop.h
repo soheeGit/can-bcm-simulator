@@ -7,6 +7,7 @@
  * 값이 바뀌면 INFO, 모든 프레임은 DEBUG 로그로 찍는다 (logger.h, M3-5).
  * BCM 상태가 바뀌면 "STATE IDLE -> DRIVING_LOCKED (T3: ...)"를 INFO로 찍는다 (M4-3).
  * 이 루프는 소스가 무엇인지 모른다. 파일 모드와 실시간 모드가 같은 코드로 판단한다.
+ * 프레임을 최대 BCM_TICK_MS(10ms)만 기다리고, 안 오면 그때도 판단한다 (M5-8, 주기 판단).
  */
 #ifndef FRAME_LOOP_H
 #define FRAME_LOOP_H
@@ -37,6 +38,7 @@ typedef struct {
     uint32_t parse_errors;   /* 형식이 틀린 줄 (너무 긴 줄 포함) */
     /* 루프가 채운다 */
     uint32_t frames;         /* 소스에서 받은 프레임 수 */
+    uint32_t ticks;          /* 프레임 없이 시간만 흘러서(TIMEOUT) 판단한 횟수 (M5-8). 파일 모드는 0 */
     DispatchStats dispatch;  /* 받은 프레임의 디스패처 결과 (ok / ignored / error) */
     uint32_t bcm_transitions;  /* BCM 상태가 바뀐 횟수 (bcm이 NULL이면 0) */
     uint32_t bcm_lock_cmds;    /* 도어 잠금 명령 횟수 */

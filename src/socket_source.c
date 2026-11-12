@@ -3,6 +3,8 @@
 
 #include "socket_source.h"
 
+#include <errno.h>
+#include <poll.h>
 #include <time.h>
 
 #include "can_socket.h"
@@ -40,10 +42,29 @@ void socket_source_close(SocketSource *ss) {
 }
 
 /* CanSource.read_frame의 소켓 구현 */
-static CanSourceResult socket_source_read(void *self, CanFrame *out, uint32_t *ts_ms) {
+static CanSourceResult socket_source_read(void *self, CanFrame *out, uint32_t *ts_ms, int timeout_ms) {
     SocketSource *ss = self;
-    for (;;) {                                      /* 우리 프레임이 올 때까지 */
-        CanReadResult r = can_socket_read(ss->fd, out);
+    const uint64_t deadline = monotonic_ms() + (timeout_ms > 0 ? (uint64_t)timeout_ms : 0u);
+    for (;;) {                                      /* 우리 프레임이 올 때까지, 또는 시간이 다 될 때까지 */
+        /* 남은 시간만큼만 기다린다 (무시할 프레임을 받고 다시 돌아와도 처음 정한 마감은 그대로) */
+        int wait_ms = CAN_SOURCE_WAIT_FOREVER;
+        if (timeout_ms >= 0) {
+            uint64_t now = monotonic_ms();
+            wait_ms = (now >= deadline) ? 0 : (int)(deadline - now);
+        }
+        /* fd에 읽을 게 생기거나(POLLIN) wait_ms가 지날 때까지 잠든다. CPU를 쓰지 않는다 */
+        struct pollfd p = { .fd = ss->fd, .events = POLLIN };
+        int n = poll(&p, 1, wait_ms);
+        if (n < 0 && errno != EINTR) {              /* EINTR: 시그널(Ctrl+C 등, M5-9)에 깨어남 → 시간 초과처럼 */
+            perror("poll(CAN)");
+            return CAN_SOURCE_ERROR;
+        }
+        if (n <= 0) {
+            *ts_ms = (uint32_t)(monotonic_ms() - ss->start_ms);
+            return CAN_SOURCE_TIMEOUT;
+        }
+
+        CanReadResult r = can_socket_read(ss->fd, out);   /* poll이 "있다"고 했으니 기다리지 않고 바로 읽힌다 */
         *ts_ms = (uint32_t)(monotonic_ms() - ss->start_ms);
         if (r == CAN_READ_OK) {
             return CAN_SOURCE_OK;
