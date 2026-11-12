@@ -23,7 +23,7 @@ make clean
 | 옵션 | 짧게 | 설명 |
 | --- | --- | --- |
 | `--file <경로>` | `-f` | 읽을 candump 로그 파일 (`--iface`와 둘 중 하나) |
-| `--iface <이름>` | `-i` | CAN 장치(예: `vcan0`)에서 실시간으로 받아 BCM 실행 (Linux) |
+| `--iface <이름>` | `-i` | CAN 장치(예: `vcan0`)에서 실시간으로 받아 BCM 실행, 0x400을 그 장치로 송신 (Linux) |
 | `--dump` | `-d` | `--iface`와 같이: BCM 없이 받는 프레임을 해석해서 찍기만 |
 | `--log-level <레벨>` | `-l` | `debug` / `info`(기본) / `warn` / `error` / `off` |
 | `--out <경로>` | `-o` | BCM이 100ms마다 보내는 0x400 BCM_STATUS를 candump 형식으로 저장 |
@@ -91,8 +91,9 @@ SocketCAN은 Linux에만 있어서 VM에서 실행한다 (`./scripts/vm_setup.sh
 make && ./build-linux/bcm_sim --iface vcan0 --dump   # 받는 대로 해석해서 출력 (Ctrl+C로 종료)
 cansend vcan0 100#1027000000000000                   # (다른 터미널) 보내 보기
 
-./build-linux/bcm_sim --iface vcan0 -o rt.log        # 실시간 BCM: 파일 모드와 같은 판단 (M5-5)
+./build-linux/bcm_sim --iface vcan0 -o rt.log        # 실시간 BCM: 파일 모드와 같은 판단 (M5-5), 0x400을 vcan0으로 송신 (M5-6)
 canplayer -I data/scenarios/02_door_open_while_driving.log vcan0=vcan0   # (다른 터미널) 시나리오 재생
+candump -td vcan0,400:7FF                            # (또 다른 터미널) BCM이 보내는 0x400만, 간격과 함께
 ```
 
 ```
