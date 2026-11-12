@@ -11,12 +11,6 @@
 | TODO 1만 채운 뒤 | `57 passed, 1 failed` — `test_to_linux_*` 통과, `test_write_to_vcan0`의 `w`만 실패 (`n = -1`이라 항상 송신 실패) |
 | 채운 뒤 | ✅ `62 passed, 0 failed`, 전체 `make test` 통과 (VM, 엄격 경고도 통과) |
 
-- 막혔던 곳 ①: **`in->can_id`** → 빌드 오류 `'CanFrame' has no member named 'can_id'`
-  - 이번 방향은 **우리 → 리눅스**라 `in`이 우리 `CanFrame`(`id`, `dlc`, `data`), `out`이 리눅스 `struct can_frame`(`can_id`, `len`, `data`). M5-4(`from_linux`)와 `in`/`out`의 타입이 **뒤바뀌었다**
-  - 같은 뜻인데 이름이 다른 칸: `id` ↔ `can_id`, `dlc` ↔ `len`. 변환 함수는 결국 "이름이 다른 칸끼리 옮겨 적기"
-- 막혔던 곳 ②: `memcpy();` 인자 없음 → `memcpy(받을 곳, 줄 곳, 바이트 수)` = `memcpy(out->data, in->data, in->dlc)`
-- 막혔던 곳 ③: TODO 2의 `write` → `write(어디로, 무엇을, 몇 바이트)` = `write(fd, &raw, sizeof(raw))`. `read`와 인자 순서가 같고 방향만 반대 (read: 소켓 → `raw`, write: `raw` → 소켓)
-- `& CAN_SFF_MASK`는 정리 때 뺐다: 바로 위에서 0x7FF 넘는 ID를 이미 거르고, 우리 `CanFrame`에는 표시(flag) 비트가 없다. (`from_linux`에서는 리눅스 `can_id`에 표시 비트가 섞여 있어서 필요했다)
 - 채우기 전에도 `test_to_linux_rejects`가 통과한 이유 → 이 테스트는 "ID 0x800, DLC 9, NULL이면 **`false`**"만 본다. 비어 있는 함수는 **무엇이든 `false`**라서 우연히 통과
   - 짝인 `test_to_linux_standard`("정상 프레임은 **`true`**")가 실패해서 비어 있다는 걸 잡았다 (34번 노트 0번과 같은 "짝 테스트")
 - `test_write_to_vcan0`에서 `if (w == 0)`으로 `read()`를 감싼 이유 (없으면 채우기 전에 무슨 일이 생기나) → **테스트가 영원히 멈춘다**
