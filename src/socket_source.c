@@ -9,6 +9,7 @@
 
 #include "can_socket.h"
 #include "logger.h"
+#include "shutdown.h"
 
 /* 지금 시각(ms). 벽시계(날짜)가 아니라 "멈추지 않고 늘기만 하는 시계"를 쓴다 */
 static uint64_t monotonic_ms(void) {
@@ -46,6 +47,12 @@ static CanSourceResult socket_source_read(void *self, CanFrame *out, uint32_t *t
     SocketSource *ss = self;
     const uint64_t deadline = monotonic_ms() + (timeout_ms > 0 ? (uint64_t)timeout_ms : 0u);
     for (;;) {                                      /* 우리 프레임이 올 때까지, 또는 시간이 다 될 때까지 */
+        /* 종료 요청(Ctrl+C, M5-9)이 있으면 "끝"이라고 알린다 → 루프가 정상적으로 끝나고 main이 정리한다
+         * 매 바퀴 확인: poll이 시그널에 깨어난 경우(EINTR)도, 프레임이 쉬지 않고 들어오는 경우도 여기서 잡힌다 */
+        if (shutdown_requested()) {
+            *ts_ms = (uint32_t)(monotonic_ms() - ss->start_ms);
+            return CAN_SOURCE_END;
+        }
         /* 남은 시간만큼만 기다린다 (무시할 프레임을 받고 다시 돌아와도 처음 정한 마감은 그대로) */
         int wait_ms = CAN_SOURCE_WAIT_FOREVER;
         if (timeout_ms >= 0) {
@@ -55,7 +62,10 @@ static CanSourceResult socket_source_read(void *self, CanFrame *out, uint32_t *t
         /* fd에 읽을 게 생기거나(POLLIN) wait_ms가 지날 때까지 잠든다. CPU를 쓰지 않는다 */
         struct pollfd p = { .fd = ss->fd, .events = POLLIN };
         int n = poll(&p, 1, wait_ms);
-        if (n < 0 && errno != EINTR) {              /* EINTR: 시그널(Ctrl+C 등, M5-9)에 깨어남 → 시간 초과처럼 */
+        if (n < 0 && errno == EINTR) {              /* 시그널(Ctrl+C 등)에 깨어남 → 위로 돌아가 종료 요청 확인 */
+            continue;
+        }
+        if (n < 0) {
             perror("poll(CAN)");
             return CAN_SOURCE_ERROR;
         }

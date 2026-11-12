@@ -4,13 +4,13 @@
  *   [   1.234s] INFO  RX 0x100 [8] 10 27 00 00 00 00 00 00    → 차속 100.00 km/h
  *
  * candump과 비슷하지만, 우리 신호 정의서대로 "무슨 뜻인지"까지 보여 준다.
- * 끝낼 때는 Ctrl+C (안전한 종료는 M5-9)
+ * 끝낼 때는 Ctrl+C → 소켓을 닫고 정상 종료 (M5-9)
  */
 #ifndef CAN_DUMP_H
 #define CAN_DUMP_H
 
-/* ifname에서 받는 대로 찍는다. 끝나지 않는다(Ctrl+C까지).
- * 반환값: 소켓을 못 열거나 읽기 오류면 1 */
+/* ifname에서 받는 대로 찍는다. 종료 요청(Ctrl+C, SIGTERM)이 올 때까지.
+ * 반환값: 0 = 종료 요청으로 끝남, 1 = 소켓을 못 열거나 읽기 오류 */
 int can_dump_run(const char *ifname);
 
 #endif

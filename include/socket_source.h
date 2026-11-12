@@ -4,7 +4,7 @@
  *
  * 29비트 ID / Remote / 에러 프레임은 건너뛴다 (DEBUG 로그).
  * poll()로 "프레임이 오거나 timeout_ms가 지날 때까지" 기다린다 (M5-8). 지나면 CAN_SOURCE_TIMEOUT
- * 파일과 달리 "끝"이 없다 → CAN_SOURCE_END를 돌려주지 않는다 (끝내기는 M5-9)
+ * 파일과 달리 "끝"이 없다 → 종료 요청(Ctrl+C, SIGTERM, shutdown.h)이 있을 때만 CAN_SOURCE_END (M5-9)
  */
 #ifndef SOCKET_SOURCE_H
 #define SOCKET_SOURCE_H

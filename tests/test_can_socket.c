@@ -1,9 +1,14 @@
-/* SocketCAN 소켓 테스트: 열기(M5-3), 받기(M5-4), 보내기(M5-6), 수신 필터(M5-7), 시간 제한(M5-8). Linux 전용
+/* SocketCAN 소켓 테스트: 열기(M5-3), 받기(M5-4), 보내기(M5-6), 수신 필터(M5-7), 시간 제한(M5-8), 안전한 종료(M5-9). Linux 전용
  *
  * vcan0이 있어야 하는 테스트는, vcan0이 없으면 건너뛴다 (VM에서 ./scripts/setup_vcan.sh 먼저)
  * 다른 테스트들은 /dev/null로 stderr를 버리지 않으니, 실패 케이스의 perror 메시지가 화면에 같이 보인다 (정상)
  */
+/* usleep, kill, fork 같은 POSIX 이름을 -std=c11에서 쓰려면 include 전에 켜야 한다 */
+#define _DEFAULT_SOURCE
+
 #include <errno.h>
+#include <signal.h>
+#include <sys/wait.h>
 #include <net/if.h>
 #include <poll.h>
 #include <stdio.h>
@@ -15,6 +20,7 @@
 
 #include "can_socket.h"
 #include "logger.h"
+#include "shutdown.h"
 #include "socket_source.h"
 #include "test_framework.h"
 
@@ -341,6 +347,42 @@ static void test_source_timeout(void) {
     socket_source_close(&ss);
 }
 
+/* ---------- 안전한 종료 (M5-9, SocketSource) ---------- */
+
+static void test_source_stops_on_request(void) {
+    if (!vcan0_exists()) {
+        printf("    (vcan0 없음: 건너뜀. ./scripts/setup_vcan.sh)\n");
+        return;
+    }
+    SocketSource ss;
+    ASSERT_EQ(0, socket_source_open(&ss, "vcan0", NULL, 0u));
+    CanSource src = socket_source_as_can_source(&ss);
+    CanFrame f;
+    uint32_t t = 0u;
+
+    /* 요청이 이미 있으면: 1초 기다리라고 해도 바로 END
+     * (실제로는 끝없이 기다리게 쓰지만, 테스트는 확인이 빠졌을 때 멈추지 않고 "TIMEOUT으로 실패"하게 1초만) */
+    shutdown_request(SIGINT);
+    ASSERT_EQ(CAN_SOURCE_END, src.read_frame(src.self, &f, &t, 1000));
+    shutdown_reset();
+
+    /* 진짜 시그널: poll로 자는 도중(최대 2초)에 자식 프로세스가 0.1초 뒤 SIGTERM을 보낸다
+     * → poll이 EINTR로 깨어나고 → 요청을 보고 END. (핸들러가 없으면 테스트가 죽고, 확인이 없으면 2초 뒤 TIMEOUT) */
+    ASSERT_EQ(0, shutdown_install());
+    pid_t child = fork();
+    if (child == 0) {                                  /* 자식: 잠깐 기다렸다가 부모에게 시그널 */
+        usleep(100000);
+        kill(getppid(), SIGTERM);
+        _exit(0);
+    }
+    ASSERT_EQ(CAN_SOURCE_END, src.read_frame(src.self, &f, &t, 2000));
+    ASSERT_EQ(SIGTERM, shutdown_signal());
+    waitpid(child, NULL, 0);
+    shutdown_reset();
+
+    socket_source_close(&ss);
+}
+
 int main(void) {
     printf("[test_can_socket]\n");
     log_set_level(LOG_LEVEL_OFF);                          /* SocketSource의 로그는 끈다 */
@@ -358,5 +400,6 @@ int main(void) {
     RUN_TEST(test_filter_bad_args);
     RUN_TEST(test_filter_on_vcan0);
     RUN_TEST(test_source_timeout);
+    RUN_TEST(test_source_stops_on_request);
     return TEST_SUMMARY();
 }

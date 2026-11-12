@@ -19,7 +19,12 @@ int can_dump_run(const char *ifname) {
     for (;;) {
         CanFrame f;
         uint32_t t_ms = 0u;
-        if (src.read_frame(src.self, &f, &t_ms, CAN_SOURCE_WAIT_FOREVER) != CAN_SOURCE_OK) {   /* 소켓은 END가 없다 → 오류 */
+        CanSourceResult r = src.read_frame(src.self, &f, &t_ms, CAN_SOURCE_WAIT_FOREVER);
+        if (r == CAN_SOURCE_END) {                  /* 종료 요청(Ctrl+C, M5-9) → 정상 종료 */
+            socket_source_close(&ss);
+            return 0;
+        }
+        if (r != CAN_SOURCE_OK) {
             socket_source_close(&ss);
             return 1;
         }

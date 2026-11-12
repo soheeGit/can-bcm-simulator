@@ -12,6 +12,7 @@
 #include "dispatcher.h"
 #include "log_reader.h"
 #include "logger.h"
+#include "shutdown.h"
 #include "signals.h"
 #include "version.h"
 
@@ -20,15 +21,19 @@
 #define EXIT_FAIL   1
 #define EXIT_USAGE  2
 
-static void print_summary(const LogReadStats *stats, const VehicleInputs *in, const BcmContext *bcm) {
+static void print_summary(const LogReadStats *stats, const VehicleInputs *in, const BcmContext *bcm, bool from_file) {
     char speed_str[32], door_str[64], ign_str[32];
     vehicle_speed_format(&in->speed, speed_str, sizeof(speed_str));
     door_status_format(&in->doors, door_str, sizeof(door_str));
     ign_status_format(&in->ign, ign_str, sizeof(ign_str));
 
     printf("\n결과\n");
-    printf("  read %u, ok %u, error %u  (빈 줄/주석 %u)\n",
-           stats->lines, stats->frames, stats->parse_errors, stats->skipped);
+    if (from_file) {
+        printf("  read %u, ok %u, error %u  (빈 줄/주석 %u)\n",
+               stats->lines, stats->frames, stats->parse_errors, stats->skipped);
+    } else {                                /* 실시간 (M5-9): 줄이 없다. 받은 프레임과 주기 판단 횟수 */
+        printf("  수신 %u프레임, 주기 판단 %u회\n", stats->frames, stats->ticks);
+    }
     printf("  디스패처: ok=%u ignored=%u error=%u\n",
            stats->dispatch.ok, stats->dispatch.ignored, stats->dispatch.error);
     printf("\n최종 차량 상태\n");
@@ -64,6 +69,10 @@ int main(int argc, char *argv[]) {
     log_set_level(opts.log_level);
 
 #if defined(__linux__)
+    /* 실시간 모드는 Ctrl+C로 끝낸다 → 바로 죽지 않고 정리하고 끝나도록 핸들러를 건다 (M5-9) */
+    if (opts.iface != NULL && shutdown_install() != 0) {
+        return EXIT_FAIL;
+    }
     if (opts.dump) {                        /* 덤프 모드 (M5-4): BCM 없이 찍기만 */
         LOG_INFO("can-bcm-simulator %s 시작: %s 덤프 (로그 레벨 %s)",
                  BCM_SIM_VERSION, opts.iface, log_level_name(opts.log_level));
@@ -121,7 +130,10 @@ int main(int argc, char *argv[]) {
             }
 
             LOG_INFO("%s에서 받는 중, 0x400 송신 중... (Ctrl+C로 종료)", opts.iface);
-            result = frame_loop_run(&src, &in, &bcm, sinks, sink_count, &stats);   /* 소켓은 끝이 없다: 오류일 때만 돌아온다 */
+            result = frame_loop_run(&src, &in, &bcm, sinks, sink_count, &stats);   /* Ctrl+C면 0, 오류면 -1로 돌아온다 */
+            if (shutdown_requested()) {
+                LOG_INFO("종료 요청 (시그널 %d) → 소켓을 닫고 끝냅니다", shutdown_signal());
+            }
             socket_source_close(&ss);
         }
     }
@@ -132,7 +144,7 @@ int main(int argc, char *argv[]) {
     if (result != 0) {
         return EXIT_FAIL;
     }
-    print_summary(&stats, &in, &bcm);
+    print_summary(&stats, &in, &bcm, opts.file != NULL);
     if (opts.out_file != NULL) {
         printf("  → %s\n", opts.out_file);
     }
