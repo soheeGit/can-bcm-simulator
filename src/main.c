@@ -6,6 +6,7 @@
 #include "cli.h"
 #if defined(__linux__)
 #include "can_dump.h"
+#include "socket_sink.h"
 #include "socket_source.h"
 #endif
 #include "dispatcher.h"
@@ -38,6 +39,9 @@ static void print_summary(const LogReadStats *stats, const VehicleInputs *in, co
     printf("  최종 상태 : %s\n", bcm_state_name(bcm->state));
     printf("  상태 전이 : %u회, 도어 잠금 명령 : %u회\n", stats->bcm_transitions, stats->bcm_lock_cmds);
     printf("  0x400 송신 : %u프레임\n", stats->tx_frames);
+    if (stats->tx_errors > 0u) {
+        printf("  송신 실패  : %u회\n", stats->tx_errors);
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -100,8 +104,22 @@ int main(int argc, char *argv[]) {
         SocketSource ss;
         if (socket_source_open(&ss, opts.iface) == 0) {
             CanSource src = socket_source_as_can_source(&ss);
-            LOG_INFO("%s에서 받는 중... (Ctrl+C로 종료)", opts.iface);
-            result = frame_loop_run(&src, &in, &bcm, tx_out, &stats);    /* 소켓은 끝이 없다: 오류일 때만 돌아온다 */
+
+            /* 0x400은 받은 소켓으로 그대로 송신 (M5-6). --out이 있으면 파일에도 */
+            SocketSink tx_sock;
+            FileSink tx_file;
+            CanSink sinks[2];
+            size_t sink_count = 0u;
+            socket_sink_init(&tx_sock, ss.fd);
+            sinks[sink_count++] = socket_sink_as_can_sink(&tx_sock);
+            if (tx_out != NULL) {
+                file_sink_init(&tx_file, tx_out);
+                tx_file.iface = opts.iface;
+                sinks[sink_count++] = file_sink_as_can_sink(&tx_file);
+            }
+
+            LOG_INFO("%s에서 받는 중, 0x400 송신 중... (Ctrl+C로 종료)", opts.iface);
+            result = frame_loop_run(&src, &in, &bcm, sinks, sink_count, &stats);   /* 소켓은 끝이 없다: 오류일 때만 돌아온다 */
             socket_source_close(&ss);
         }
     }

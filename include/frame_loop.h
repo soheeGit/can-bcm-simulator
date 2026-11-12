@@ -2,7 +2,7 @@
  *
  *   CanSource ──read_frame()──→ CanFrame + 시각 ──can_dispatch()──→ VehicleInputs
  *   (파일 / 소켓 / 테스트용 가짜)                       ──bcm_step()──→ BCM 상태 (M4)
- *                                                       ──bcm_tx_poll()──→ 0x400 (M4-8)
+ *                                                       ──bcm_tx_poll()──→ 0x400 ──CanSink──→ 파일 / 소켓 (M5-6)
  *
  * 값이 바뀌면 INFO, 모든 프레임은 DEBUG 로그로 찍는다 (logger.h, M3-5).
  * BCM 상태가 바뀌면 "STATE IDLE -> DRIVING_LOCKED (T3: ...)"를 INFO로 찍는다 (M4-3).
@@ -11,10 +11,11 @@
 #ifndef FRAME_LOOP_H
 #define FRAME_LOOP_H
 
+#include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #include "bcm.h"
+#include "can_sink.h"
 #include "can_source.h"
 #include "dispatcher.h"
 
@@ -40,16 +41,17 @@ typedef struct {
     uint32_t bcm_transitions;  /* BCM 상태가 바뀐 횟수 (bcm이 NULL이면 0) */
     uint32_t bcm_lock_cmds;    /* 도어 잠금 명령 횟수 */
     uint32_t tx_frames;        /* 만든 0x400 프레임 수 (M4-8) */
+    uint32_t tx_errors;        /* 출력(sink)에 내보내다 실패한 횟수 (M5-6). 실패해도 BCM은 계속 돈다 */
     BcmTransitionRecord transitions[FRAME_LOOP_MAX_TRANSITIONS];   /* 앞에서부터 최대 16개 */
 } FrameLoopStats;
 
 /* src가 END나 ERROR를 줄 때까지 프레임마다: 디스패처 → BCM 판단 → 0x400 송신
  * - inputs: 프레임을 반영할 차량 상태 (미리 vehicle_inputs_init 해 둘 것)
  * - bcm: 프레임마다 bcm_step을 돌릴 BCM (미리 bcm_init 해 둘 것). NULL이면 BCM 없이 디스패처까지만
- * - tx_out: BCM이 보내는 0x400을 candump 형식으로 쓸 곳 (M4-8). NULL이면 안 쓴다
+ * - sinks, sink_count: BCM이 만든 0x400을 내보낼 곳들 (M5-6). 0개면(NULL, 0) 만들기만 하고 안 내보낸다
  * - stats: 결과 통계 (0으로 초기화해서 채운다)
  * 반환값: 0 = 소스가 끝남(END), -1 = 인자가 NULL이거나 소스가 ERROR */
-int frame_loop_run(const CanSource *src, VehicleInputs *inputs, BcmContext *bcm, FILE *tx_out,
-                   FrameLoopStats *stats);
+int frame_loop_run(const CanSource *src, VehicleInputs *inputs, BcmContext *bcm,
+                   const CanSink *sinks, size_t sink_count, FrameLoopStats *stats);
 
 #endif

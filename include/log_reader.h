@@ -13,6 +13,7 @@
 
 #include "bcm.h"
 #include "dispatcher.h"
+#include "file_sink.h"
 #include "file_source.h"
 #include "frame_loop.h"
 

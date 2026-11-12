@@ -13,7 +13,16 @@ int log_read_stream(FILE *in, VehicleInputs *inputs, BcmContext *bcm, FILE *tx_o
     file_source_init(&fs, in);
     CanSource src = file_source_as_can_source(&fs);     /* 파일을 "프레임 소스"로 감싸서 */
 
-    int result = frame_loop_run(&src, inputs, bcm, tx_out, stats);   /* 소켓과 같은 루프로 */
+    FileSink out;                                       /* --out이 있으면 출력도 하나 (M5-6) */
+    CanSink sink = {0};
+    size_t sink_count = 0u;
+    if (tx_out != NULL) {
+        file_sink_init(&out, tx_out);
+        sink = file_sink_as_can_sink(&out);
+        sink_count = 1u;
+    }
+
+    int result = frame_loop_run(&src, inputs, bcm, &sink, sink_count, stats);   /* 소켓과 같은 루프로 */
 
     /* 줄 단위 통계는 파일 소스만 아는 것 → 옮겨 적는다 */
     stats->lines = fs.lines;

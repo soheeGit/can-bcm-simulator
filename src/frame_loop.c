@@ -2,7 +2,6 @@
 
 #include <stdbool.h>
 
-#include "log_parser.h"
 #include "logger.h"
 #include "signals.h"
 
@@ -101,23 +100,27 @@ static void log_bcm(const BcmOutputs *out, const VehicleInputs *in) {
     }
 }
 
-/* BCM이 보낼 0x400을 로그(DEBUG)와 파일(tx_out)로 (M4-8). 송신 프레임의 interface 이름은 vcan0으로 쓴다 */
-static void emit_tx(const CanFrame *f, uint32_t t_ms, FILE *tx_out) {
+/* BCM이 만든 0x400을 로그(DEBUG)로 찍고, 출력(sink)마다 내보낸다 (M4-8, M5-6).
+ * 한 곳이 실패해도 나머지에는 보내고, BCM은 멈추지 않는다 (송신 실패 ≠ 판단 중단) */
+static void emit_tx(const CanFrame *f, uint32_t t_ms, const CanSink *sinks, size_t sink_count,
+                    FrameLoopStats *stats) {
     char frame_str[CAN_FRAME_STR_SIZE];
     can_frame_format(f, frame_str, sizeof(frame_str));
     LOG_DEBUG("TX %s", frame_str);
-    if (tx_out != NULL) {
-        char line[CANDUMP_LINE_MAX];
-        if (format_candump_line(line, sizeof(line), (uint64_t)t_ms * 1000u, "vcan0", f) > 0) {
-            fputs(line, tx_out);
-            fflush(tx_out);                     /* 실시간 모드는 Ctrl+C로 끝나니 줄마다 내보낸다 */
+    for (size_t i = 0; i < sink_count; i++) {
+        if (!sinks[i].write_frame(sinks[i].self, f, t_ms)) {
+            stats->tx_errors++;
+            LOG_WARN("송신 실패 (%s): %s", sinks[i].name, frame_str);
         }
     }
 }
 
-int frame_loop_run(const CanSource *src, VehicleInputs *inputs, BcmContext *bcm, FILE *tx_out,
-                   FrameLoopStats *stats) {
+int frame_loop_run(const CanSource *src, VehicleInputs *inputs, BcmContext *bcm,
+                   const CanSink *sinks, size_t sink_count, FrameLoopStats *stats) {
     if (src == NULL || src->read_frame == NULL || inputs == NULL || stats == NULL) {
+        return -1;
+    }
+    if (sinks == NULL && sink_count > 0u) {
         return -1;
     }
     *stats = (FrameLoopStats){0};
@@ -164,7 +167,7 @@ int frame_loop_run(const CanSource *src, VehicleInputs *inputs, BcmContext *bcm,
             CanFrame tx;
             if (bcm_tx_poll(bcm, &out, t_ms, &tx)) {
                 stats->tx_frames++;
-                emit_tx(&tx, t_ms, tx_out);
+                emit_tx(&tx, t_ms, sinks, sink_count, stats);
             }
         }
     }
