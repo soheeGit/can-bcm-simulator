@@ -107,6 +107,18 @@ static void test_iface_option(void) {
     ASSERT_TRUE(strcmp("r.log", o.out_file) == 0);
 }
 
+static void test_no_filter_option(void) {
+    char *a[] = {"bcm_sim", "-i", "vcan0", "--no-filter", NULL};
+    char *b[] = {"bcm_sim", "-i", "vcan0", NULL};
+    char *file_nf[] = {"bcm_sim", "-f", "a.log", "-n", NULL};             /* 파일 모드에는 필터가 없다 */
+    CliOptions o;
+    ASSERT_EQ(CLI_OK, cli_parse(ARGC(a), a, &o, NULL));
+    ASSERT_TRUE(o.no_filter);
+    ASSERT_EQ(CLI_OK, cli_parse(ARGC(b), b, &o, NULL));
+    ASSERT_FALSE(o.no_filter);                                           /* 기본은 필터 켬 */
+    ASSERT_EQ(CLI_ERROR, cli_parse(ARGC(file_nf), file_nf, &o, NULL));
+}
+
 static void test_parse_twice(void) {
     /* getopt 상태를 되돌리지 않으면 두 번째 해석이 틀어진다 (reset_getopt 확인) */
     char *a[] = {"bcm_sim", "--file", "first.log", NULL};
@@ -128,6 +140,7 @@ int main(void) {
     RUN_TEST(test_errors);
     RUN_TEST(test_out_option);
     RUN_TEST(test_iface_option);
+    RUN_TEST(test_no_filter_option);
     RUN_TEST(test_parse_twice);
     return TEST_SUMMARY();
 }

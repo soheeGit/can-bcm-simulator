@@ -17,12 +17,13 @@ static void reset_getopt(void) {
 void cli_print_usage(FILE *out, const char *prog) {
     fprintf(out,
             "사용법: %s --file <로그 파일> [--log-level <레벨>] [--out <출력 파일>]\n"
-            "        %s --iface <CAN 장치> [--dump] [--log-level <레벨>] [--out <출력 파일>]   (Linux)\n"
+            "        %s --iface <CAN 장치> [--dump] [--no-filter] [--log-level <레벨>] [--out <출력 파일>]   (Linux)\n"
             "\n"
             "옵션:\n"
             "  -f, --file <경로>         읽을 candump 로그 파일\n"
             "  -i, --iface <이름>        CAN 장치에서 실시간으로 받아 BCM 실행 (예: vcan0, Linux 전용)\n"
             "  -d, --dump                BCM 없이 받는 프레임을 해석해서 찍기만 (--iface와 같이)\n"
+            "  -n, --no-filter           수신 필터 없이 모든 ID를 받기 (--iface와 같이, 기본은 0x100/0x200/0x300만)\n"
             "  -l, --log-level <레벨>    debug | info | warn | error | off (기본: info)\n"
             "  -o, --out <경로>          BCM이 보내는 0x400 BCM_STATUS를 candump 형식으로 저장\n"
             "  -h, --help                이 도움말\n"
@@ -44,6 +45,7 @@ CliResult cli_parse(int argc, char *argv[], CliOptions *opts, FILE *err) {
     opts->out_file = NULL;
     opts->iface = NULL;
     opts->dump = false;
+    opts->no_filter = false;
 
     /* 긴 옵션 표: { 이름, 값이 필요한가, (안 씀), 짧은 옵션 글자 } */
     static const struct option long_opts[] = {
@@ -52,12 +54,13 @@ CliResult cli_parse(int argc, char *argv[], CliOptions *opts, FILE *err) {
         { "out",       required_argument, NULL, 'o' },
         { "iface",     required_argument, NULL, 'i' },
         { "dump",      no_argument,       NULL, 'd' },
+        { "no-filter", no_argument,       NULL, 'n' },
         { "help",      no_argument,       NULL, 'h' },
         { "version",   no_argument,       NULL, 'V' },
         { NULL, 0, NULL, 0 }                              /* 표의 끝 표시 */
     };
     /* 짧은 옵션: 글자 뒤의 ':'는 "값이 필요하다"는 뜻 (-f 경로, -l 레벨, -o 경로, -i 장치) */
-    static const char short_opts[] = "f:l:o:i:dhV";
+    static const char short_opts[] = "f:l:o:i:dnhV";
 
     reset_getopt();
     opterr = 0;                  /* getopt가 직접 오류를 찍지 않게 → 우리가 한국어로 찍는다 */
@@ -84,6 +87,9 @@ CliResult cli_parse(int argc, char *argv[], CliOptions *opts, FILE *err) {
                 break;
             case 'd':
                 opts->dump = true;
+                break;
+            case 'n':
+                opts->no_filter = true;
                 break;
             case 'h':
                 return CLI_HELP;
@@ -126,6 +132,12 @@ CliResult cli_parse(int argc, char *argv[], CliOptions *opts, FILE *err) {
     if (opts->dump && opts->iface == NULL) {
         if (err != NULL) {
             fprintf(err, "--dump는 --iface와 같이 씁니다\n");
+        }
+        return CLI_ERROR;
+    }
+    if (opts->no_filter && opts->iface == NULL) {
+        if (err != NULL) {
+            fprintf(err, "--no-filter는 --iface와 같이 씁니다\n");
         }
         return CLI_ERROR;
     }

@@ -19,6 +19,7 @@
 typedef struct {
     const char *file;        /* --file: 읽을 로그 파일 */
     const char *iface;       /* --iface: CAN 장치 이름(예: vcan0). --file과 둘 중 하나만 (M5-4, M5-5) */
+    bool        no_filter;   /* --no-filter: 수신 필터를 걸지 않고 전부 받는다 (--iface와 같이, M5-7) */
     bool        dump;        /* --dump: 받는 프레임을 해석해서 찍기만 한다 (--iface와 같이) */
     LogLevel    log_level;   /* --log-level: 기본 INFO */
     const char *out_file;    /* --out: BCM이 보내는 0x400을 candump 형식으로 쓸 파일. 없으면 NULL (M4-8) */

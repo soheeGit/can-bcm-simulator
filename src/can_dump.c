@@ -10,10 +10,10 @@
 
 int can_dump_run(const char *ifname) {
     SocketSource ss;
-    if (socket_source_open(&ss, ifname) != 0) {
+    if (socket_source_open(&ss, ifname, NULL, 0u) != 0) {
         return 1;
     }
-    CanSource src = socket_source_as_can_source(&ss);   /* M5-5: 소켓도 CanSource로 받는다 */
+    CanSource src = socket_source_as_can_source(&ss);   /* M5-5: 소켓도 CanSource로 받는다. 덤프는 필터 없이 전부 */
     LOG_INFO("%s에서 받는 중... (Ctrl+C로 종료)", ifname);
 
     for (;;) {

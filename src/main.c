@@ -102,7 +102,9 @@ int main(int argc, char *argv[]) {
 #if defined(__linux__)
     else {
         SocketSource ss;
-        if (socket_source_open(&ss, opts.iface) == 0) {
+        /* 수신 필터 (M5-7): 디스패처가 쓰는 ID만 커널에서 걸러 받는다. --no-filter면 전부 */
+        const uint32_t *rx_ids = opts.no_filter ? NULL : DISPATCH_RX_IDS;
+        if (socket_source_open(&ss, opts.iface, rx_ids, DISPATCH_RX_ID_COUNT) == 0) {
             CanSource src = socket_source_as_can_source(&ss);
 
             /* 0x400은 받은 소켓으로 그대로 송신 (M5-6). --out이 있으면 파일에도 */

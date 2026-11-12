@@ -15,12 +15,20 @@ static uint64_t monotonic_ms(void) {
     return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
 }
 
-int socket_source_open(SocketSource *ss, const char *ifname) {
+int socket_source_open(SocketSource *ss, const char *ifname, const uint32_t *rx_ids, size_t rx_count) {
     *ss = (SocketSource){ .fd = -1 };
     ss->fd = can_socket_open(ifname);
     if (ss->fd < 0) {
         LOG_ERROR("%s 소켓을 열 수 없습니다", ifname != NULL ? ifname : "(null)");
         return -1;
+    }
+    if (rx_ids != NULL) {
+        if (can_socket_set_filter(ss->fd, rx_ids, rx_count) != 0) {
+            LOG_ERROR("%s 수신 필터를 걸 수 없습니다", ifname);
+            socket_source_close(ss);
+            return -1;
+        }
+        LOG_INFO("수신 필터: %zu개 ID만 받음", rx_count);
     }
     ss->start_ms = monotonic_ms();
     return 0;

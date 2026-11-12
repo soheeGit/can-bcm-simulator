@@ -8,6 +8,7 @@
 #ifndef SOCKET_SOURCE_H
 #define SOCKET_SOURCE_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "can_source.h"
@@ -18,8 +19,9 @@ typedef struct {
     uint32_t skipped;        /* 무시한 프레임 수 (EFF/RTR/ERR) */
 } SocketSource;
 
-/* ifname(예: "vcan0")을 연다. 0 = 성공, -1 = 실패 (ERROR 로그) */
-int socket_source_open(SocketSource *ss, const char *ifname);
+/* ifname(예: "vcan0")을 연다. 0 = 성공, -1 = 실패 (ERROR 로그)
+ * rx_ids: 받을 ID 목록 (M5-7 수신 필터). NULL이면 필터 없이 전부 받는다 (덤프 모드, --no-filter) */
+int socket_source_open(SocketSource *ss, const char *ifname, const uint32_t *rx_ids, size_t rx_count);
 
 /* 닫는다. 이미 닫혔으면 아무것도 안 한다 */
 void socket_source_close(SocketSource *ss);

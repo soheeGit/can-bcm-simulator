@@ -25,6 +25,7 @@ make clean
 | `--file <경로>` | `-f` | 읽을 candump 로그 파일 (`--iface`와 둘 중 하나) |
 | `--iface <이름>` | `-i` | CAN 장치(예: `vcan0`)에서 실시간으로 받아 BCM 실행, 0x400을 그 장치로 송신 (Linux) |
 | `--dump` | `-d` | `--iface`와 같이: BCM 없이 받는 프레임을 해석해서 찍기만 |
+| `--no-filter` | `-n` | `--iface`와 같이: 수신 필터 없이 모든 ID를 받기 (기본은 커널 필터로 0x100/0x200/0x300만) |
 | `--log-level <레벨>` | `-l` | `debug` / `info`(기본) / `warn` / `error` / `off` |
 | `--out <경로>` | `-o` | BCM이 100ms마다 보내는 0x400 BCM_STATUS를 candump 형식으로 저장 |
 | `--help` | `-h` | 사용법 |
