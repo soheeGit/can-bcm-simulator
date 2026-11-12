@@ -96,6 +96,29 @@ static void test_dispatch_own_bcm_status_ignored(void) {
     ASSERT_EQ(DISPATCH_IGNORED, can_dispatch(&f, &in, 1000, NULL));
 }
 
+static void test_rx_ids_match_dispatch(void) {
+    /* 수신 필터 목록(M5-7) = 디스패처가 처리하는 ID. 어긋나면 필터가 필요한 프레임을 막거나, 쓸데없는 걸 들인다
+     * 0x000 ~ 0x7FF를 전부 넣어 보고, IGNORED가 아닌 ID가 정확히 목록과 같은지 확인 */
+    uint32_t handled = 0u;
+    uint32_t listed_and_handled = 0u;
+    for (uint32_t id = 0u; id <= CAN_FRAME_STD_ID_MAX; id++) {
+        VehicleInputs in;
+        vehicle_inputs_init(&in);
+        CanFrame f = frame(id, 8, 0x00, 0x00);
+        if (can_dispatch(&f, &in, 0, NULL) == DISPATCH_IGNORED) {
+            continue;
+        }
+        handled++;
+        for (uint32_t i = 0u; i < DISPATCH_RX_ID_COUNT; i++) {
+            if (DISPATCH_RX_IDS[i] == id) {
+                listed_and_handled++;
+            }
+        }
+    }
+    ASSERT_EQ(DISPATCH_RX_ID_COUNT, handled);              /* 처리하는 ID 개수 = 목록 개수 */
+    ASSERT_EQ(DISPATCH_RX_ID_COUNT, listed_and_handled);   /* 그리고 전부 목록에 있다 */
+}
+
 /* ---------- 해석 불가 → 오류, 이전 값 유지 ---------- */
 
 static void test_dispatch_short_dlc_keeps_previous(void) {
@@ -196,6 +219,7 @@ int main(void) {
     RUN_TEST(test_dispatch_ign);
     RUN_TEST(test_dispatch_unknown_id_ignored);
     RUN_TEST(test_dispatch_own_bcm_status_ignored);
+    RUN_TEST(test_rx_ids_match_dispatch);
     RUN_TEST(test_dispatch_short_dlc_keeps_previous);
     RUN_TEST(test_dispatch_invalid_frame);
     RUN_TEST(test_dispatch_null);

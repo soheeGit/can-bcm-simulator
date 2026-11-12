@@ -2,6 +2,11 @@
 
 #include <stddef.h>
 
+/* can_dispatch()의 switch에 있는 ID와 같아야 한다 (test_dispatcher가 확인) */
+const uint32_t DISPATCH_RX_IDS[DISPATCH_RX_ID_COUNT] = {
+    MSG_ID_VEHICLE_SPEED, MSG_ID_DOOR_STATUS, MSG_ID_IGN_STATUS,
+};
+
 void vehicle_inputs_init(VehicleInputs *in) {
     if (in == NULL) {
         return;
