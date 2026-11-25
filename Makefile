@@ -47,7 +47,7 @@ GEN_SCENARIOS := $(BUILD)/gen_scenarios
 # make socket_demo (Linux): 소켓을 열고 fd 번호를 보여 주는 실습 프로그램 (M5-3)
 SOCKET_DEMO := $(BUILD)/can_socket_demo
 
-.PHONY: all debug test clean scenarios socket_demo
+.PHONY: all debug test clean scenarios socket_demo e2e
 
 all: $(TARGET)
 
@@ -89,6 +89,10 @@ scenarios: $(GEN_SCENARIOS)
 
 $(GEN_SCENARIOS): tools/gen_scenarios.c $(LIB_OBJS) | $(BUILD)
 	$(CC) $(CFLAGS) $(DEPFLAGS) $(filter %.c %.o,$^) -o $@
+
+# make e2e (Linux, VM): 시나리오를 canplayer로 vcan0에 재생해서 실시간 결과를 파일 모드와 비교 (M5-10)
+e2e: $(TARGET)
+	./scripts/e2e_replay.sh
 
 socket_demo: $(SOCKET_DEMO)
 
