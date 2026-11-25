@@ -97,6 +97,8 @@ cansend vcan0 100#1027000000000000                   # (다른 터미널) 보내
                                                      #   Ctrl+C / kill → 소켓을 닫고 요약을 찍고 종료 코드 0 (M5-9)
 canplayer -I data/scenarios/02_door_open_while_driving.log vcan0=vcan0   # (다른 터미널) 시나리오 재생
 candump -td vcan0,400:7FF                            # (또 다른 터미널) BCM이 보내는 0x400만, 간격과 함께
+
+make e2e                                             # 시나리오를 vcan0에 재생해서 실시간 결과 = 파일 모드 결과인지 자동 확인 (M5-10)
 ```
 
 ```
