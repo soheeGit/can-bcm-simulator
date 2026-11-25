@@ -16,6 +16,10 @@
 #include "can_frame.h"
 #include "signals.h"
 
+/* 디스패처가 처리하는(BCM이 받아야 하는) 메시지 ID 목록. 소켓 수신 필터에 쓴다 (M5-7) */
+#define DISPATCH_RX_ID_COUNT 3u
+extern const uint32_t DISPATCH_RX_IDS[DISPATCH_RX_ID_COUNT];
+
 /* BCM이 판단에 쓰는 "지금 차량 상태"의 모음 */
 typedef struct {
     VehicleSpeed speed;

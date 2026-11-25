@@ -143,6 +143,12 @@ typedef struct {
  * f나 msg가 NULL이면 아무것도 안 한다 */
 void encode_bcm_status(const BcmStatusMsg *msg, CanFrame *f);
 
+/* 프레임 하나를 사람이 읽는 한 줄로 (M5-4 덤프 모드 로그용). ID별 디코더를 그대로 쓴다
+ *   0x100 → "차속 100.00 km/h"       0x200 → "도어 FL=1 FR=0 RL=0 RR=0 TRUNK=0"
+ *   0x300 → "시동 IGN=ON GEAR=D"     0x400 → "BCM 상태=1 잠금=1 경고음=0 alive=3"
+ *   그 밖의 ID → "-"(관심 없음),  우리 ID인데 해석 못 함(DLC 부족 등) → "해석 불가" */
+void can_frame_describe(const CanFrame *f, char *buf, size_t size);
+
 /* 0x400 프레임 → BcmStatusMsg (round-trip 확인, M5에서 받는 쪽 흉내).
  * 반환값: 해석할 수 있으면 true (false: NULL, 유효하지 않은 프레임, ID가 0x400이 아님, DLC < 8) */
 bool decode_bcm_status(const CanFrame *f, BcmStatusMsg *out);

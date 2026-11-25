@@ -22,7 +22,10 @@ make clean
 
 | 옵션 | 짧게 | 설명 |
 | --- | --- | --- |
-| `--file <경로>` | `-f` | 읽을 candump 로그 파일 (필수) |
+| `--file <경로>` | `-f` | 읽을 candump 로그 파일 (`--iface`와 둘 중 하나) |
+| `--iface <이름>` | `-i` | CAN 장치(예: `vcan0`)에서 실시간으로 받아 BCM 실행, 0x400을 그 장치로 송신 (Linux) |
+| `--dump` | `-d` | `--iface`와 같이: BCM 없이 받는 프레임을 해석해서 찍기만 |
+| `--no-filter` | `-n` | `--iface`와 같이: 수신 필터 없이 모든 ID를 받기 (기본은 커널 필터로 0x100/0x200/0x300만) |
 | `--log-level <레벨>` | `-l` | `debug` / `info`(기본) / `warn` / `error` / `off` |
 | `--out <경로>` | `-o` | BCM이 100ms마다 보내는 0x400 BCM_STATUS를 candump 형식으로 저장 |
 | `--help` | `-h` | 사용법 |
@@ -79,6 +82,28 @@ BCM
 ```
 
 `data[0]` = 상태, `data[1]` = 잠금 명령(bit 0) / 경고음(bit 1), `data[7]` = Alive Counter (0 ~ 15). 정의: [docs/signal-spec.md](docs/signal-spec.md)
+
+### 예: vcan0에서 실시간으로 받기 (Linux, M5)
+
+SocketCAN은 Linux에만 있어서 VM에서 실행한다 (`./scripts/vm_setup.sh` → `multipass shell can-vm`). Linux에서는 빌드 폴더가 `build-linux/`다.
+
+```bash
+./scripts/setup_vcan.sh                              # vcan0 만들기
+make && ./build-linux/bcm_sim --iface vcan0 --dump   # 받는 대로 해석해서 출력 (Ctrl+C로 종료)
+cansend vcan0 100#1027000000000000                   # (다른 터미널) 보내 보기
+
+./build-linux/bcm_sim --iface vcan0 -o rt.log        # 실시간 BCM: 파일 모드와 같은 판단 (M5-5), 0x400을 vcan0으로 송신 (M5-6)
+                                                     #   프레임이 없어도 10ms마다 판단 → 0x400 계속, 500ms 뒤 신호 끊김 (M5-8)
+                                                     #   Ctrl+C / kill → 소켓을 닫고 요약을 찍고 종료 코드 0 (M5-9)
+canplayer -I data/scenarios/02_door_open_while_driving.log vcan0=vcan0   # (다른 터미널) 시나리오 재생
+candump -td vcan0,400:7FF                            # (또 다른 터미널) BCM이 보내는 0x400만, 간격과 함께
+
+make e2e                                             # 시나리오를 vcan0에 재생해서 실시간 결과 = 파일 모드 결과인지 자동 확인 (M5-10)
+```
+
+```
+[   0.525s] INFO  RX 0x100 [8] 10 27 00 00 00 00 00 00    → 차속 100.00 km/h
+```
 
 ### 예: 잘못된 프레임만 보기
 

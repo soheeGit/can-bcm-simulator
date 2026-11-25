@@ -354,6 +354,35 @@ static void test_decode_bcm_status_rejects(void) {
     encode_bcm_status(NULL, &f);                      /* 죽지 않기 */
 }
 
+/* ---------- 한 줄 설명 (M5-4) ---------- */
+
+static void test_describe(void) {
+    char buf[96];
+    CanFrame speed = { MSG_ID_VEHICLE_SPEED, 8u, { 0x10, 0x27 } };       /* 0x2710 = 10000 → 100.00 */
+    can_frame_describe(&speed, buf, sizeof(buf));
+    ASSERT_TRUE(strcmp("차속 100.00 km/h", buf) == 0);
+
+    CanFrame door = { MSG_ID_DOOR_STATUS, 1u, { 0x01 } };
+    can_frame_describe(&door, buf, sizeof(buf));
+    ASSERT_TRUE(strcmp("도어 FL=1 FR=0 RL=0 RR=0 TRUNK=0", buf) == 0);
+
+    CanFrame ign = { MSG_ID_IGN_STATUS, 2u, { 0x02, 0x03 } };
+    can_frame_describe(&ign, buf, sizeof(buf));
+    ASSERT_TRUE(strcmp("시동 IGN=ON GEAR=D", buf) == 0);
+
+    CanFrame bcm = { MSG_ID_BCM_STATUS, 8u, { 0x01, 0x01, 0, 0, 0, 0, 0, 0x03 } };
+    can_frame_describe(&bcm, buf, sizeof(buf));
+    ASSERT_TRUE(strcmp("BCM 상태=1 잠금=1 경고음=0 alive=3", buf) == 0);
+
+    CanFrame other = { 0x7FFu, 4u, { 0xDE, 0xAD, 0xBE, 0xEF } };
+    can_frame_describe(&other, buf, sizeof(buf));
+    ASSERT_TRUE(strcmp("-", buf) == 0);
+
+    CanFrame short_speed = { MSG_ID_VEHICLE_SPEED, 1u, { 0x10 } };      /* DLC 1: 차속은 2바이트 필요 */
+    can_frame_describe(&short_speed, buf, sizeof(buf));
+    ASSERT_TRUE(strcmp("해석 불가", buf) == 0);
+}
+
 int main(void) {
     printf("[test_signals]\n");
     RUN_TEST(test_speed_zero);
@@ -388,5 +417,6 @@ int main(void) {
     RUN_TEST(test_encode_bcm_status_bits);
     RUN_TEST(test_bcm_status_round_trip);
     RUN_TEST(test_decode_bcm_status_rejects);
+    RUN_TEST(test_describe);
     return TEST_SUMMARY();
 }

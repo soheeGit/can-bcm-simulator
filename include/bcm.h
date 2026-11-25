@@ -55,6 +55,10 @@
 /* 0x400 BCM_STATUS 송신 주기 (M4-8, signal-spec: 모든 메시지 100ms) */
 #define BCM_TX_PERIOD_MS  100u
 
+/* 주기 판단 (M5-8): 프레임이 안 와도 최소 이 간격으로 bcm_step을 부른다 (실제 ECU의 10ms 태스크).
+ * 그래야 "아무것도 안 옴"(신호 끊김)을 알아채고, 0x400도 100ms마다 계속 나간다 */
+#define BCM_TICK_MS  10u
+
 /* ---------- 상태 ---------- */
 
 /* 값은 0x400 BCM_STATUS의 BcmState 신호와 같다 (signal-spec.md). 바꾸지 말 것 */

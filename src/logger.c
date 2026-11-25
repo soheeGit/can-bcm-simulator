@@ -83,4 +83,5 @@ void log_write(LogLevel level, const char *file, int line, const char *fmt, ...)
     va_end(args);
 
     fputc('\n', out);
+    fflush(out);        /* 한 줄마다 바로 내보내기 (M5): 실시간 모드에서 모아 두면 늦게 보이거나, 강제 종료 때 사라진다 */
 }
