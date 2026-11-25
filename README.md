@@ -40,7 +40,7 @@ make clean
 ```
 
 ```
-[   0.000s] INFO  can-bcm-simulator 0.2.0 시작: data/scenarios/02_door_open_while_driving.log (로그 레벨 INFO)
+[   0.000s] INFO  can-bcm-simulator 0.3.0 시작: data/scenarios/02_door_open_while_driving.log (로그 레벨 INFO)
 [   0.000s] INFO  시동  IGN=OFF GEAR=P
 [   0.000s] INFO  도어  FL=0 FR=0 RL=0 RR=0 TRUNK=0
 [   0.000s] INFO  차속  0.00 km/h
